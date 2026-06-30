@@ -32,6 +32,16 @@ const localBindingConfig = {
 };
 
 export default defineConfig({
+  // 开发环境监听
+  server: {
+    host: '0.0.0.0',
+    port: 3000
+  },
+  // 预览/生产环境监听（关键！）
+  preview: {
+    host: '0.0.0.0',
+    port: 3000
+  },
   plugins: [
     vinext(),
     sites(),

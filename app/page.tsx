@@ -42,6 +42,10 @@ const MATERIALS_KEY = "research-material-batches-v1";
 const USAGE_KEY = "research-material-usage-v1";
 const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
 
+function getTodayDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 const initialMaterials: MaterialBatch[] = [
   {
     id: "batch-ethanol-001",
@@ -134,7 +138,7 @@ const emptyMaterial = {
   batchNo: "",
   supplier: "",
   storageLocation: "",
-  receivedDate: new Date().toISOString().slice(0, 10),
+  receivedDate: getTodayDate(),
   expiryDate: "",
   initialQuantity: "",
   minQuantity: "0",
@@ -144,7 +148,7 @@ const emptyMaterial = {
 const emptyUsage = {
   materialBatchId: "",
   userName: "",
-  usedDate: new Date().toISOString().slice(0, 10),
+  usedDate: getTodayDate(),
   usedQuantity: "",
   purpose: "",
   notes: "",
@@ -198,22 +202,33 @@ function exportCsv(filename: string, rows: Record<string, string | number>[]) {
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("inventory");
-  const [materials, setMaterials] = useState<MaterialBatch[]>(() => readStoredList(MATERIALS_KEY, initialMaterials));
-  const [usageRecords, setUsageRecords] = useState<UsageRecord[]>(() => readStoredList(USAGE_KEY, initialUsage));
-  const [materialForm, setMaterialForm] = useState(emptyMaterial);
-  const [usageForm, setUsageForm] = useState(emptyUsage);
+  const [materials, setMaterials] = useState<MaterialBatch[]>(initialMaterials);
+  const [usageRecords, setUsageRecords] = useState<UsageRecord[]>(initialUsage);
+  const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
+  const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [query, setQuery] = useState("");
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
   const [message, setMessage] = useState("");
+  const [hasLoadedStoredData, setHasLoadedStoredData] = useState(false);
 
   useEffect(() => {
+    queueMicrotask(() => {
+      setMaterials(readStoredList(MATERIALS_KEY, initialMaterials));
+      setUsageRecords(readStoredList(USAGE_KEY, initialUsage));
+      setHasLoadedStoredData(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedStoredData) return;
     window.localStorage.setItem(MATERIALS_KEY, JSON.stringify(materials));
-  }, [materials]);
+  }, [hasLoadedStoredData, materials]);
 
   useEffect(() => {
+    if (!hasLoadedStoredData) return;
     window.localStorage.setItem(USAGE_KEY, JSON.stringify(usageRecords));
-  }, [usageRecords]);
+  }, [hasLoadedStoredData, usageRecords]);
 
   const usableMaterials = useMemo(
     () =>
@@ -288,7 +303,7 @@ export default function Home() {
       updatedAt: now,
     };
     setMaterials((current) => [batch, ...current]);
-    setMaterialForm({ ...emptyMaterial, receivedDate: new Date().toISOString().slice(0, 10) });
+    setMaterialForm({ ...emptyMaterial, receivedDate: getTodayDate() });
     setMessage("入库成功，库存已按批次更新。");
     setActiveTab("inventory");
   }
@@ -329,7 +344,7 @@ export default function Home() {
       ),
     );
     setUsageRecords((current) => [record, ...current]);
-    setUsageForm({ ...emptyUsage, usedDate: new Date().toISOString().slice(0, 10) });
+    setUsageForm({ ...emptyUsage, usedDate: getTodayDate() });
     setMessage("领用登记成功，剩余库存已同步扣减。");
     setActiveTab("inventory");
   }
