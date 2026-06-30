@@ -8,12 +8,15 @@ import {
   type InventoryState,
   type MaterialBatch,
   type MaterialInput,
+  type ReservationInput,
+  type ReservationRecord,
   type UsageInput,
   type UsageRecord,
 } from "@/lib/materials";
 
 type MaterialRow = {
   id: string;
+  sap_no: string;
   name: string;
   category: string;
   specification: string;
@@ -34,6 +37,7 @@ type MaterialRow = {
 type UsageRow = {
   id: string;
   material_batch_id: string;
+  sap_no: string;
   material_name: string;
   batch_no: string;
   user_name: string;
@@ -41,6 +45,17 @@ type UsageRow = {
   used_quantity: number;
   purpose: string;
   notes: string;
+  created_at: string;
+};
+
+type ReservationRow = {
+  id: string;
+  requester: string;
+  sap_no: string;
+  material_name: string;
+  unit: string;
+  quantity: number;
+  expected_date: string;
   created_at: string;
 };
 
@@ -69,6 +84,7 @@ function getDatabase() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS materials (
       id TEXT PRIMARY KEY,
+      sap_no TEXT NOT NULL,
       name TEXT NOT NULL,
       category TEXT NOT NULL,
       specification TEXT NOT NULL,
@@ -89,6 +105,7 @@ function getDatabase() {
     CREATE TABLE IF NOT EXISTS usage_records (
       id TEXT PRIMARY KEY,
       material_batch_id TEXT NOT NULL,
+      sap_no TEXT NOT NULL,
       material_name TEXT NOT NULL,
       batch_no TEXT NOT NULL,
       user_name TEXT NOT NULL,
@@ -100,13 +117,35 @@ function getDatabase() {
       FOREIGN KEY (material_batch_id) REFERENCES materials(id)
     );
 
+    CREATE TABLE IF NOT EXISTS reservation_records (
+      id TEXT PRIMARY KEY,
+      requester TEXT NOT NULL,
+      sap_no TEXT NOT NULL,
+      material_name TEXT NOT NULL,
+      unit TEXT NOT NULL,
+      quantity REAL NOT NULL,
+      expected_date TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS usage_records_created_at_idx
       ON usage_records(created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS reservation_records_expected_date_idx
+      ON reservation_records(expected_date ASC, created_at DESC);
   `);
+  ensureColumn(db, "materials", "sap_no", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "usage_records", "sap_no", "TEXT NOT NULL DEFAULT ''");
 
   cachedDb = db;
   seedDatabaseIfEmpty(db);
   return db;
+}
+
+function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (columns.some((item) => item.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
 }
 
 function seedDatabaseIfEmpty(db: DatabaseSync) {
@@ -119,6 +158,7 @@ function seedDatabaseIfEmpty(db: DatabaseSync) {
 function materialFromRow(row: MaterialRow): MaterialBatch {
   return {
     id: row.id,
+    sapNo: row.sap_no,
     name: row.name,
     category: row.category,
     specification: row.specification,
@@ -141,6 +181,7 @@ function usageFromRow(row: UsageRow): UsageRecord {
   return {
     id: row.id,
     materialBatchId: row.material_batch_id,
+    sapNo: row.sap_no,
     materialName: row.material_name,
     batchNo: row.batch_no,
     userName: row.user_name,
@@ -152,16 +193,30 @@ function usageFromRow(row: UsageRow): UsageRecord {
   };
 }
 
+function reservationFromRow(row: ReservationRow): ReservationRecord {
+  return {
+    id: row.id,
+    requester: row.requester,
+    sapNo: row.sap_no,
+    materialName: row.material_name,
+    unit: row.unit,
+    quantity: row.quantity,
+    expectedDate: row.expected_date,
+    createdAt: row.created_at,
+  };
+}
+
 function insertMaterial(db: DatabaseSync, batch: MaterialBatch) {
   db.prepare(`
     INSERT INTO materials (
-      id, name, category, specification, unit, batch_no, supplier, storage_location,
+      id, sap_no, name, category, specification, unit, batch_no, supplier, storage_location,
       received_date, expiry_date, initial_quantity, remaining_quantity, min_quantity,
       notes, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     batch.id,
+    batch.sapNo,
     batch.name,
     batch.category,
     batch.specification,
@@ -183,13 +238,14 @@ function insertMaterial(db: DatabaseSync, batch: MaterialBatch) {
 function insertUsage(db: DatabaseSync, record: UsageRecord) {
   db.prepare(`
     INSERT INTO usage_records (
-      id, material_batch_id, material_name, batch_no, user_name,
+      id, material_batch_id, sap_no, material_name, batch_no, user_name,
       used_date, used_quantity, purpose, notes, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     record.id,
     record.materialBatchId,
+    record.sapNo,
     record.materialName,
     record.batchNo,
     record.userName,
@@ -201,9 +257,28 @@ function insertUsage(db: DatabaseSync, record: UsageRecord) {
   );
 }
 
+function insertReservation(db: DatabaseSync, record: ReservationRecord) {
+  db.prepare(`
+    INSERT INTO reservation_records (
+      id, requester, sap_no, material_name, unit, quantity, expected_date, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    record.id,
+    record.requester,
+    record.sapNo,
+    record.materialName,
+    record.unit,
+    record.quantity,
+    record.expectedDate,
+    record.createdAt,
+  );
+}
+
 function resetDemoData(db = getDatabase()) {
   db.exec("BEGIN IMMEDIATE;");
   try {
+    db.exec("DELETE FROM reservation_records;");
     db.exec("DELETE FROM usage_records;");
     db.exec("DELETE FROM materials;");
     for (const batch of initialMaterials) insertMaterial(db, batch);
@@ -213,6 +288,10 @@ function resetDemoData(db = getDatabase()) {
     db.exec("ROLLBACK;");
     throw error;
   }
+}
+
+function isEightDigitSapNo(value: string) {
+  return /^\d{8}$/.test(value);
 }
 
 function positiveNumber(value: string | number | undefined) {
@@ -239,24 +318,32 @@ export function getInventoryState(): InventoryState {
   const usageRecords = (
     db.prepare("SELECT * FROM usage_records ORDER BY created_at DESC, id DESC").all() as UsageRow[]
   ).map(usageFromRow);
-  return { materials, usageRecords };
+  const reservationRecords = (
+    db.prepare("SELECT * FROM reservation_records ORDER BY expected_date ASC, created_at DESC").all() as ReservationRow[]
+  ).map(reservationFromRow);
+  return { materials, usageRecords, reservationRecords };
 }
 
 export function createMaterial(input: MaterialInput): InventoryState {
   const quantity = positiveNumber(input.initialQuantity);
   const minQuantity = positiveNumber(input.minQuantity ?? 0);
+  const sapNo = requiredText(input.sapNo);
   const name = requiredText(input.name);
   const batchNo = requiredText(input.batchNo);
   const unit = requiredText(input.unit);
   const expiryDate = requiredText(input.expiryDate);
 
+  if (!isEightDigitSapNo(sapNo)) {
+    throw new Error("SAP号必须是 8 位数字。");
+  }
   if (!name || !batchNo || !unit || !expiryDate || quantity <= 0) {
-    throw new Error("请补全物料名称、批号、单位、有效期，并填写大于 0 的入库数量。");
+    throw new Error("请补全SAP号、物料名称、批号、单位、有效期，并填写大于 0 的入库数量。");
   }
 
   const now = new Date().toISOString();
   const batch: MaterialBatch = {
     id: `batch-${randomUUID()}`,
+    sapNo,
     name,
     category: requiredText(input.category) || "未分类",
     specification: requiredText(input.specification),
@@ -301,6 +388,7 @@ export function createUsageRecord(input: UsageInput): InventoryState {
     const record: UsageRecord = {
       id: `usage-${randomUUID()}`,
       materialBatchId: batch.id,
+      sapNo: batch.sap_no,
       materialName: batch.name,
       batchNo: batch.batch_no,
       userName,
@@ -323,6 +411,35 @@ export function createUsageRecord(input: UsageInput): InventoryState {
     throw error;
   }
 
+  return getInventoryState();
+}
+
+export function createReservation(input: ReservationInput): InventoryState {
+  const requester = requiredText(input.requester);
+  const sapNo = requiredText(input.sapNo);
+  const materialName = requiredText(input.materialName);
+  const unit = requiredText(input.unit);
+  const quantity = positiveNumber(input.quantity);
+  const expectedDate = requiredText(input.expectedDate);
+
+  if (!requester || !materialName || !unit || !expectedDate || quantity <= 0) {
+    throw new Error("请补全预约人、物料名称、单位、数量和期望入库日期。");
+  }
+  if (!isEightDigitSapNo(sapNo)) {
+    throw new Error("SAP号必须是 8 位数字。");
+  }
+
+  const record: ReservationRecord = {
+    id: `reservation-${randomUUID()}`,
+    requester,
+    sapNo,
+    materialName,
+    unit,
+    quantity,
+    expectedDate,
+    createdAt: new Date().toISOString(),
+  };
+  insertReservation(getDatabase(), record);
   return getInventoryState();
 }
 

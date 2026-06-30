@@ -1,9 +1,9 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import type { InventoryState, MaterialBatch, UsageRecord } from "@/lib/materials";
+import type { InventoryState, MaterialBatch, ReservationRecord, UsageRecord } from "@/lib/materials";
 
-type Tab = "inventory" | "intake" | "usage" | "records";
+type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList";
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
 
@@ -14,6 +14,7 @@ function getTodayDate() {
 }
 
 const emptyMaterial = {
+  sapNo: "",
   name: "",
   category: "",
   specification: "",
@@ -37,12 +38,26 @@ const emptyUsage = {
   notes: "",
 };
 
+const emptyReservation = {
+  requester: "",
+  sapNo: "",
+  materialName: "",
+  unit: "",
+  quantity: "",
+  expectedDate: getTodayDate(),
+};
+
 function daysUntil(dateValue: string) {
   if (!dateValue) return Number.POSITIVE_INFINITY;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const target = new Date(`${dateValue}T00:00:00`);
   return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function formatWeekday(dateValue: string) {
+  if (!dateValue) return "";
+  return new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date(`${dateValue}T00:00:00`));
 }
 
 function getExpiryStatus(batch: MaterialBatch) {
@@ -107,8 +122,10 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("inventory");
   const [materials, setMaterials] = useState<MaterialBatch[]>([]);
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
+  const [reservationRecords, setReservationRecords] = useState<ReservationRecord[]>([]);
   const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
+  const [reservationForm, setReservationForm] = useState(() => ({ ...emptyReservation, expectedDate: getTodayDate() }));
   const [password, setPassword] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -121,6 +138,7 @@ export default function Home() {
   const applyState = useCallback((state: InventoryState) => {
     setMaterials(state.materials);
     setUsageRecords(state.usageRecords);
+    setReservationRecords(state.reservationRecords);
   }, []);
 
   const loadState = useCallback(async () => {
@@ -172,7 +190,7 @@ export default function Home() {
     return materials.filter((batch) => {
       const matchesKeyword =
         !keyword ||
-        [batch.name, batch.category, batch.batchNo, batch.supplier, batch.storageLocation]
+        [batch.sapNo, batch.name, batch.category, batch.batchNo, batch.supplier, batch.storageLocation]
           .join(" ")
           .toLowerCase()
           .includes(keyword);
@@ -189,9 +207,24 @@ export default function Home() {
     return usageRecords.filter((record) =>
       !keyword
         ? true
-        : [record.materialName, record.batchNo, record.userName, record.purpose].join(" ").toLowerCase().includes(keyword),
+        : [record.sapNo, record.materialName, record.batchNo, record.userName, record.purpose]
+            .join(" ")
+            .toLowerCase()
+            .includes(keyword),
     );
   }, [usageRecords, query]);
+
+  const filteredReservations = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    return reservationRecords.filter((record) =>
+      !keyword
+        ? true
+        : [record.requester, record.sapNo, record.materialName, record.unit, record.expectedDate]
+            .join(" ")
+            .toLowerCase()
+            .includes(keyword),
+    );
+  }, [reservationRecords, query]);
 
   async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -217,6 +250,7 @@ export default function Home() {
       await requestJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
       setMaterials([]);
       setUsageRecords([]);
+      setReservationRecords([]);
       setIsAuthenticated(false);
       setMessage("已退出登录。");
     } catch (error) {
@@ -264,6 +298,25 @@ export default function Home() {
     }
   }
 
+  async function handleReservationSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>("/api/reservations", {
+        method: "POST",
+        body: JSON.stringify(reservationForm),
+      });
+      applyState(state);
+      setReservationForm({ ...emptyReservation, expectedDate: getTodayDate() });
+      setMessage("领料预约已提交，预约清单已更新。");
+      setActiveTab("reservationList");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "提交预约失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function resetDemoData() {
     setIsSubmitting(true);
     try {
@@ -282,7 +335,7 @@ export default function Home() {
       <main className="app-shell auth-shell">
         <section className="auth-panel">
           <p className="eyebrow">科研物料管理</p>
-          <h1>实验室库存与领用台账</h1>
+          <h1>科研开发部物料管理系统</h1>
           <form className="auth-form" onSubmit={handleLoginSubmit}>
             <label>
               试用密码
@@ -310,7 +363,7 @@ export default function Home() {
       <header className="topbar">
         <div>
           <p className="eyebrow">科研物料管理</p>
-          <h1>实验室库存与领用台账</h1>
+          <h1>科研开发部物料管理系统</h1>
         </div>
         <div className="top-actions">
           <button className="secondary" onClick={() => exportCsv("库存总览.csv", materials.map(formatMaterialExport))}>
@@ -340,18 +393,20 @@ export default function Home() {
         <TabButton active={activeTab === "intake"} onClick={() => setActiveTab("intake")}>物料入库</TabButton>
         <TabButton active={activeTab === "usage"} onClick={() => setActiveTab("usage")}>领用登记</TabButton>
         <TabButton active={activeTab === "records"} onClick={() => setActiveTab("records")}>流水记录</TabButton>
+        <TabButton active={activeTab === "warehouseRequest"} tone="request" onClick={() => setActiveTab("warehouseRequest")}>从仓储领料预约</TabButton>
+        <TabButton active={activeTab === "reservationList"} tone="schedule" onClick={() => setActiveTab("reservationList")}>预约清单</TabButton>
       </nav>
 
       {message ? <div className="notice">{message}</div> : null}
 
-      {(activeTab === "inventory" || activeTab === "records") && (
+      {(activeTab === "inventory" || activeTab === "records" || activeTab === "reservationList") && (
         <section className="toolbar">
           <label className="search">
             <span>搜索</span>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="物料、批号、供应商、领用人"
+              placeholder="SAP号、物料、批号、供应商、领用人、预约人"
             />
           </label>
           {activeTab === "inventory" ? (
@@ -396,6 +451,7 @@ export default function Home() {
             <button className="secondary" onClick={resetDemoData} disabled={isSubmitting}>恢复演示数据</button>
           </div>
           <form className="form-grid" onSubmit={handleMaterialSubmit}>
+            <TextInput label="SAP号" value={materialForm.sapNo} onChange={(sapNo) => setMaterialForm({ ...materialForm, sapNo })} required placeholder="8位数字" pattern="\\d{8}" maxLength={8} />
             <TextInput label="物料名称" value={materialForm.name} onChange={(name) => setMaterialForm({ ...materialForm, name })} required />
             <TextInput label="分类" value={materialForm.category} onChange={(category) => setMaterialForm({ ...materialForm, category })} placeholder="试剂 / 耗材 / 标准品" />
             <TextInput label="规格" value={materialForm.specification} onChange={(specification) => setMaterialForm({ ...materialForm, specification })} placeholder="500 mL/瓶" />
@@ -435,7 +491,7 @@ export default function Home() {
                 <option value="">请选择可领用批次</option>
                 {usableMaterials.map((batch) => (
                   <option key={batch.id} value={batch.id}>
-                    {batch.name} / {batch.batchNo} / 剩余 {batch.remainingQuantity} {batch.unit} / 有效期 {batch.expiryDate}
+                    {batch.sapNo} / {batch.name} / {batch.batchNo} / 剩余 {batch.remainingQuantity} {batch.unit} / 有效期 {batch.expiryDate}
                   </option>
                 ))}
               </select>
@@ -451,6 +507,7 @@ export default function Home() {
             {selectedBatch ? (
               <div className="batch-preview wide">
                 <strong>{selectedBatch.name}</strong>
+                <span>SAP号 {selectedBatch.sapNo || "-"}</span>
                 <span>批号 {selectedBatch.batchNo}</span>
                 <span>当前可用 {selectedBatch.remainingQuantity} {selectedBatch.unit}</span>
                 <span>有效期 {selectedBatch.expiryDate}</span>
@@ -460,6 +517,45 @@ export default function Home() {
               <button className="primary" type="submit" disabled={isSubmitting}>提交领用并扣减库存</button>
             </div>
           </form>
+        </section>
+      )}
+
+      {activeTab === "warehouseRequest" && (
+        <section className="panel">
+          <div className="panel-heading">
+            <h2>从仓储领料预约</h2>
+            <p>提交后进入预约清单，便于物料管理员提前安排本周领料。</p>
+          </div>
+          <form className="form-grid" onSubmit={handleReservationSubmit}>
+            <TextInput label="预约人" value={reservationForm.requester} onChange={(requester) => setReservationForm({ ...reservationForm, requester })} required />
+            <TextInput label="SAP号" value={reservationForm.sapNo} onChange={(sapNo) => setReservationForm({ ...reservationForm, sapNo })} required placeholder="8位数字" pattern="\\d{8}" maxLength={8} />
+            <TextInput label="物料名称" value={reservationForm.materialName} onChange={(materialName) => setReservationForm({ ...reservationForm, materialName })} required />
+            <TextInput label="单位" value={reservationForm.unit} onChange={(unit) => setReservationForm({ ...reservationForm, unit })} required placeholder="瓶 / 盒 / g" />
+            <TextInput label="数量" type="number" value={reservationForm.quantity} onChange={(quantity) => setReservationForm({ ...reservationForm, quantity })} required min="0" step="0.01" />
+            <label>
+              期望入库日期
+              <input
+                type="date"
+                value={reservationForm.expectedDate}
+                onChange={(event) => setReservationForm({ ...reservationForm, expectedDate: event.target.value })}
+                required
+              />
+              <small>{reservationForm.expectedDate ? formatWeekday(reservationForm.expectedDate) : ""}</small>
+            </label>
+            <div className="form-actions">
+              <button className="primary" type="submit" disabled={isSubmitting}>提交预约</button>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {activeTab === "reservationList" && (
+        <section className="panel">
+          <div className="panel-heading">
+            <h2>预约清单</h2>
+            <button className="secondary" onClick={() => exportCsv("仓储领料预约清单.csv", filteredReservations.map(formatReservationExport))}>导出Excel</button>
+          </div>
+          <ReservationsTable records={filteredReservations} />
         </section>
       )}
 
@@ -485,9 +581,20 @@ function Stat({ label, value, tone = "default" }: { label: string; value: number
   );
 }
 
-function TabButton({ active, children, onClick }: { active: boolean; children: React.ReactNode; onClick: () => void }) {
+function TabButton({
+  active,
+  children,
+  onClick,
+  tone,
+}: {
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+  tone?: "request" | "schedule";
+}) {
+  const className = ["tab", active ? "active" : "", tone ? `tab-${tone}` : ""].filter(Boolean).join(" ");
   return (
-    <button className={active ? "tab active" : "tab"} onClick={onClick}>
+    <button className={className} onClick={onClick}>
       {children}
     </button>
   );
@@ -502,6 +609,8 @@ function TextInput({
   required,
   min,
   step,
+  pattern,
+  maxLength,
 }: {
   label: string;
   value: string;
@@ -511,6 +620,8 @@ function TextInput({
   required?: boolean;
   min?: string;
   step?: string;
+  pattern?: string;
+  maxLength?: number;
 }) {
   return (
     <label>
@@ -523,6 +634,8 @@ function TextInput({
         required={required}
         min={min}
         step={step}
+        pattern={pattern}
+        maxLength={maxLength}
       />
     </label>
   );
@@ -534,6 +647,7 @@ function InventoryTable({ materials }: { materials: MaterialBatch[] }) {
       <table>
         <thead>
           <tr>
+            <th>SAP号</th>
             <th>物料</th>
             <th>分类</th>
             <th>规格</th>
@@ -550,6 +664,7 @@ function InventoryTable({ materials }: { materials: MaterialBatch[] }) {
             const stock = getStockStatus(batch);
             return (
               <tr key={batch.id}>
+                <td><strong>{batch.sapNo || "-"}</strong></td>
                 <td>
                   <strong>{batch.name}</strong>
                   <small>{batch.storageLocation || "未填写位置"}</small>
@@ -587,6 +702,7 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
         <thead>
           <tr>
             <th>领用日期</th>
+            <th>SAP号</th>
             <th>物料</th>
             <th>批号</th>
             <th>领用人</th>
@@ -599,6 +715,7 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
           {records.map((record) => (
             <tr key={record.id}>
               <td>{record.usedDate}</td>
+              <td>{record.sapNo || "-"}</td>
               <td><strong>{record.materialName}</strong></td>
               <td>{record.batchNo}</td>
               <td>{record.userName}</td>
@@ -614,12 +731,49 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
   );
 }
 
+function ReservationsTable({ records }: { records: ReservationRecord[] }) {
+  return (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>期望入库日期</th>
+            <th>星期</th>
+            <th>预约人</th>
+            <th>SAP号</th>
+            <th>物料名称</th>
+            <th>数量</th>
+            <th>单位</th>
+            <th>提交时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          {records.map((record) => (
+            <tr key={record.id}>
+              <td>{record.expectedDate}</td>
+              <td>{formatWeekday(record.expectedDate)}</td>
+              <td>{record.requester}</td>
+              <td><strong>{record.sapNo}</strong></td>
+              <td>{record.materialName}</td>
+              <td>{record.quantity}</td>
+              <td>{record.unit}</td>
+              <td>{record.createdAt.slice(0, 10)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {records.length === 0 ? <p className="empty">暂无领料预约。</p> : null}
+    </div>
+  );
+}
+
 function Badge({ tone, children }: { tone: string; children: React.ReactNode }) {
   return <span className={`badge ${tone}`}>{children}</span>;
 }
 
 function formatMaterialExport(batch: MaterialBatch) {
   return {
+    SAP号: batch.sapNo,
     物料名称: batch.name,
     分类: batch.category,
     规格: batch.specification,
@@ -640,6 +794,7 @@ function formatMaterialExport(batch: MaterialBatch) {
 
 function formatUsageExport(record: UsageRecord) {
   return {
+    SAP号: record.sapNo,
     物料名称: record.materialName,
     批号: record.batchNo,
     领用人: record.userName,
@@ -648,5 +803,18 @@ function formatUsageExport(record: UsageRecord) {
     用途项目: record.purpose,
     备注: record.notes,
     创建时间: record.createdAt,
+  };
+}
+
+function formatReservationExport(record: ReservationRecord) {
+  return {
+    期望入库日期: record.expectedDate,
+    星期: formatWeekday(record.expectedDate),
+    预约人: record.requester,
+    SAP号: record.sapNo,
+    物料名称: record.materialName,
+    数量: record.quantity,
+    单位: record.unit,
+    提交时间: record.createdAt,
   };
 }

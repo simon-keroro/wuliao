@@ -1,5 +1,6 @@
 export type MaterialBatch = {
   id: string;
+  sapNo: string;
   name: string;
   category: string;
   specification: string;
@@ -20,6 +21,7 @@ export type MaterialBatch = {
 export type UsageRecord = {
   id: string;
   materialBatchId: string;
+  sapNo: string;
   materialName: string;
   batchNo: string;
   userName: string;
@@ -30,12 +32,25 @@ export type UsageRecord = {
   createdAt: string;
 };
 
+export type ReservationRecord = {
+  id: string;
+  requester: string;
+  sapNo: string;
+  materialName: string;
+  unit: string;
+  quantity: number;
+  expectedDate: string;
+  createdAt: string;
+};
+
 export type InventoryState = {
   materials: MaterialBatch[];
   usageRecords: UsageRecord[];
+  reservationRecords: ReservationRecord[];
 };
 
 export type MaterialInput = {
+  sapNo?: string;
   name?: string;
   category?: string;
   specification?: string;
@@ -59,9 +74,19 @@ export type UsageInput = {
   notes?: string;
 };
 
+export type ReservationInput = {
+  requester?: string;
+  sapNo?: string;
+  materialName?: string;
+  unit?: string;
+  quantity?: string | number;
+  expectedDate?: string;
+};
+
 export const initialMaterials: MaterialBatch[] = [
   {
     id: "batch-ethanol-001",
+    sapNo: "10000001",
     name: "无水乙醇",
     category: "试剂",
     specification: "500 mL/瓶",
@@ -80,6 +105,7 @@ export const initialMaterials: MaterialBatch[] = [
   },
   {
     id: "batch-tip-001",
+    sapNo: "10000002",
     name: "移液枪吸头",
     category: "耗材",
     specification: "200 uL，96支/盒",
@@ -98,6 +124,7 @@ export const initialMaterials: MaterialBatch[] = [
   },
   {
     id: "batch-buffer-001",
+    sapNo: "10000003",
     name: "PBS缓冲液",
     category: "试剂",
     specification: "1 L/瓶",
@@ -120,6 +147,7 @@ export const initialUsage: UsageRecord[] = [
   {
     id: "usage-001",
     materialBatchId: "batch-ethanol-001",
+    sapNo: "10000001",
     materialName: "无水乙醇",
     batchNo: "ET20260601",
     userName: "王珂",
@@ -132,6 +160,7 @@ export const initialUsage: UsageRecord[] = [
   {
     id: "usage-002",
     materialBatchId: "batch-tip-001",
+    sapNo: "10000002",
     materialName: "移液枪吸头",
     batchNo: "TIP2605",
     userName: "李研",

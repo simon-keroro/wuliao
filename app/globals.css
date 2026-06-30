@@ -156,15 +156,20 @@ h2 {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-  margin: 8px 0 18px;
+  gap: 10px;
+  margin: 6px 0 14px;
 }
 
 .stat {
+  display: flex;
+  min-height: 78px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
-  padding: 16px;
+  padding: 12px 14px;
   box-shadow: var(--shadow);
 }
 
@@ -176,8 +181,9 @@ h2 {
 
 .stat strong {
   display: block;
-  margin-top: 8px;
-  font-size: 30px;
+  margin-top: 0;
+  font-size: 28px;
+  line-height: 1;
 }
 
 .stat.warning strong {
@@ -207,6 +213,31 @@ h2 {
 .tab.active {
   border-color: var(--primary);
   background: var(--primary);
+  color: #ffffff;
+}
+
+.tab-request {
+  margin-left: auto;
+  border-color: #97c7bc;
+  background: #e8f5ef;
+  color: #185a49;
+}
+
+.tab-request.active {
+  border-color: #1f6f5b;
+  background: #1f6f5b;
+  color: #ffffff;
+}
+
+.tab-schedule {
+  border-color: #e3c37d;
+  background: #fff4d8;
+  color: #7a4a0c;
+}
+
+.tab-schedule.active {
+  border-color: #9a6415;
+  background: #9a6415;
   color: #ffffff;
 }
 
@@ -322,7 +353,7 @@ textarea:focus {
 
 table {
   width: 100%;
-  min-width: 1040px;
+  min-width: 1120px;
   border-collapse: collapse;
 }
 
@@ -408,13 +439,20 @@ small {
     justify-content: flex-start;
   }
 
-  .stats-grid,
   .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
   .toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .tab-request {
+    margin-left: 0;
   }
 }
 
@@ -423,9 +461,17 @@ small {
     padding: 14px;
   }
 
-  .stats-grid,
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stat {
+    min-height: 66px;
+    padding: 10px 12px;
   }
 
   .panel {
