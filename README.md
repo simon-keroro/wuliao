@@ -16,6 +16,23 @@ npm run dev
 npm run build
 ```
 
+## VPS Shared Inventory Setup
+
+This app stores shared inventory data in a server-side SQLite file when it runs
+on a VPS.
+
+Required production environment variables:
+
+```bash
+APP_PASSWORD="change-this-password"
+SESSION_SECRET="change-this-long-random-secret"
+DATABASE_PATH="./data/materials.sqlite"
+```
+
+Make sure the `data/` directory is writable by the process that runs
+`npm run start`. If `DATABASE_PATH` is omitted, the app uses
+`./data/materials.sqlite`.
+
 This starter does not use `wrangler.jsonc`.
 
 ## Included Shape

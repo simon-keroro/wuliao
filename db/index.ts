@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./schema";
 
-let cachedDb: any = null;
+let cachedDb: ReturnType<typeof drizzle> | null = null;
 
 export function getDb() {
   if (cachedDb) return cachedDb;

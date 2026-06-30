@@ -1,134 +1,17 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-
-type MaterialBatch = {
-  id: string;
-  name: string;
-  category: string;
-  specification: string;
-  unit: string;
-  batchNo: string;
-  supplier: string;
-  storageLocation: string;
-  receivedDate: string;
-  expiryDate: string;
-  initialQuantity: number;
-  remainingQuantity: number;
-  minQuantity: number;
-  notes: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type UsageRecord = {
-  id: string;
-  materialBatchId: string;
-  materialName: string;
-  batchNo: string;
-  userName: string;
-  usedDate: string;
-  usedQuantity: number;
-  purpose: string;
-  notes: string;
-  createdAt: string;
-};
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import type { InventoryState, MaterialBatch, UsageRecord } from "@/lib/materials";
 
 type Tab = "inventory" | "intake" | "usage" | "records";
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
 
-const MATERIALS_KEY = "research-material-batches-v1";
-const USAGE_KEY = "research-material-usage-v1";
 const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
 
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
 }
-
-const initialMaterials: MaterialBatch[] = [
-  {
-    id: "batch-ethanol-001",
-    name: "无水乙醇",
-    category: "试剂",
-    specification: "500 mL/瓶",
-    unit: "瓶",
-    batchNo: "ET20260601",
-    supplier: "国药试剂",
-    storageLocation: "试剂柜 A-02",
-    receivedDate: "2026-06-01",
-    expiryDate: "2026-08-15",
-    initialQuantity: 12,
-    remainingQuantity: 8,
-    minQuantity: 3,
-    notes: "易燃，避光保存",
-    createdAt: "2026-06-01T09:00:00.000Z",
-    updatedAt: "2026-06-18T09:00:00.000Z",
-  },
-  {
-    id: "batch-tip-001",
-    name: "移液枪吸头",
-    category: "耗材",
-    specification: "200 uL，96支/盒",
-    unit: "盒",
-    batchNo: "TIP2605",
-    supplier: "Axygen",
-    storageLocation: "耗材架 B-01",
-    receivedDate: "2026-05-20",
-    expiryDate: "2028-05-20",
-    initialQuantity: 40,
-    remainingQuantity: 6,
-    minQuantity: 8,
-    notes: "无菌盒装",
-    createdAt: "2026-05-20T09:00:00.000Z",
-    updatedAt: "2026-06-12T09:00:00.000Z",
-  },
-  {
-    id: "batch-buffer-001",
-    name: "PBS缓冲液",
-    category: "试剂",
-    specification: "1 L/瓶",
-    unit: "瓶",
-    batchNo: "PBS2604",
-    supplier: "实验室自配",
-    storageLocation: "4C冰箱 2层",
-    receivedDate: "2026-04-18",
-    expiryDate: "2026-06-20",
-    initialQuantity: 5,
-    remainingQuantity: 2,
-    minQuantity: 1,
-    notes: "已过期，仅保留记录",
-    createdAt: "2026-04-18T09:00:00.000Z",
-    updatedAt: "2026-06-10T09:00:00.000Z",
-  },
-];
-
-const initialUsage: UsageRecord[] = [
-  {
-    id: "usage-001",
-    materialBatchId: "batch-ethanol-001",
-    materialName: "无水乙醇",
-    batchNo: "ET20260601",
-    userName: "王珂",
-    usedDate: "2026-06-18",
-    usedQuantity: 4,
-    purpose: "样品清洗",
-    notes: "常规实验",
-    createdAt: "2026-06-18T09:00:00.000Z",
-  },
-  {
-    id: "usage-002",
-    materialBatchId: "batch-tip-001",
-    materialName: "移液枪吸头",
-    batchNo: "TIP2605",
-    userName: "李研",
-    usedDate: "2026-06-12",
-    usedQuantity: 34,
-    purpose: "细胞培养",
-    notes: "周消耗",
-    createdAt: "2026-06-12T09:00:00.000Z",
-  },
-];
 
 const emptyMaterial = {
   name: "",
@@ -153,10 +36,6 @@ const emptyUsage = {
   purpose: "",
   notes: "",
 };
-
-function createId(prefix: string) {
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
 
 function daysUntil(dateValue: string) {
   if (!dateValue) return Number.POSITIVE_INFINITY;
@@ -200,35 +79,74 @@ function exportCsv(filename: string, rows: Record<string, string | number>[]) {
   URL.revokeObjectURL(url);
 }
 
+class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function requestJson<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  });
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) {
+    throw new ApiError(payload.error ?? "请求失败。", response.status);
+  }
+  return payload as T;
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<Tab>("inventory");
-  const [materials, setMaterials] = useState<MaterialBatch[]>(initialMaterials);
-  const [usageRecords, setUsageRecords] = useState<UsageRecord[]>(initialUsage);
+  const [materials, setMaterials] = useState<MaterialBatch[]>([]);
+  const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
   const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
+  const [password, setPassword] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [query, setQuery] = useState("");
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
   const [message, setMessage] = useState("");
-  const [hasLoadedStoredData, setHasLoadedStoredData] = useState(false);
+
+  const applyState = useCallback((state: InventoryState) => {
+    setMaterials(state.materials);
+    setUsageRecords(state.usageRecords);
+  }, []);
+
+  const loadState = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const state = await requestJson<InventoryState>("/api/state");
+      applyState(state);
+      setIsAuthenticated(true);
+      setMessage("");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        setIsAuthenticated(false);
+        setMessage("");
+      } else {
+        setMessage(error instanceof Error ? error.message : "读取库存数据失败。");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  }, [applyState]);
 
   useEffect(() => {
     queueMicrotask(() => {
-      setMaterials(readStoredList(MATERIALS_KEY, initialMaterials));
-      setUsageRecords(readStoredList(USAGE_KEY, initialUsage));
-      setHasLoadedStoredData(true);
+      void loadState();
     });
-  }, []);
-
-  useEffect(() => {
-    if (!hasLoadedStoredData) return;
-    window.localStorage.setItem(MATERIALS_KEY, JSON.stringify(materials));
-  }, [hasLoadedStoredData, materials]);
-
-  useEffect(() => {
-    if (!hasLoadedStoredData) return;
-    window.localStorage.setItem(USAGE_KEY, JSON.stringify(usageRecords));
-  }, [hasLoadedStoredData, usageRecords]);
+  }, [loadState]);
 
   const usableMaterials = useMemo(
     () =>
@@ -275,84 +193,116 @@ export default function Home() {
     );
   }, [usageRecords, query]);
 
-  function handleMaterialSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const quantity = Number(materialForm.initialQuantity);
-    const minQuantity = Number(materialForm.minQuantity);
-    if (!materialForm.name || !materialForm.batchNo || !materialForm.unit || !materialForm.expiryDate || quantity <= 0) {
-      setMessage("请补全物料名称、批号、单位、有效期，并填写大于 0 的入库数量。");
-      return;
+    setIsSubmitting(true);
+    try {
+      await requestJson<{ ok: boolean }>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ password }),
+      });
+      setPassword("");
+      setIsAuthenticated(true);
+      await loadState();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "登录失败。");
+    } finally {
+      setIsSubmitting(false);
     }
-    const now = new Date().toISOString();
-    const batch: MaterialBatch = {
-      id: createId("batch"),
-      name: materialForm.name.trim(),
-      category: materialForm.category.trim() || "未分类",
-      specification: materialForm.specification.trim(),
-      unit: materialForm.unit.trim(),
-      batchNo: materialForm.batchNo.trim(),
-      supplier: materialForm.supplier.trim(),
-      storageLocation: materialForm.storageLocation.trim(),
-      receivedDate: materialForm.receivedDate,
-      expiryDate: materialForm.expiryDate,
-      initialQuantity: quantity,
-      remainingQuantity: quantity,
-      minQuantity: Number.isFinite(minQuantity) ? minQuantity : 0,
-      notes: materialForm.notes.trim(),
-      createdAt: now,
-      updatedAt: now,
-    };
-    setMaterials((current) => [batch, ...current]);
-    setMaterialForm({ ...emptyMaterial, receivedDate: getTodayDate() });
-    setMessage("入库成功，库存已按批次更新。");
-    setActiveTab("inventory");
   }
 
-  function handleUsageSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleLogout() {
+    setIsSubmitting(true);
+    try {
+      await requestJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+      setMaterials([]);
+      setUsageRecords([]);
+      setIsAuthenticated(false);
+      setMessage("已退出登录。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "退出失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleMaterialSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const quantity = Number(usageForm.usedQuantity);
-    if (!selectedBatch || !usageForm.userName || !usageForm.usedDate || quantity <= 0) {
-      setMessage("请选择可领用批次，并填写领用人、日期和大于 0 的领用量。");
-      return;
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>("/api/materials", {
+        method: "POST",
+        body: JSON.stringify(materialForm),
+      });
+      applyState(state);
+      setMaterialForm({ ...emptyMaterial, receivedDate: getTodayDate() });
+      setMessage("入库成功，库存已同步到服务器。");
+      setActiveTab("inventory");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "入库失败。");
+    } finally {
+      setIsSubmitting(false);
     }
-    if (getExpiryStatus(selectedBatch).key === "expired") {
-      setMessage("该批次已过期，不能领用。");
-      return;
+  }
+
+  async function handleUsageSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>("/api/usage-records", {
+        method: "POST",
+        body: JSON.stringify(usageForm),
+      });
+      applyState(state);
+      setUsageForm({ ...emptyUsage, usedDate: getTodayDate() });
+      setMessage("领用登记成功，剩余库存已同步扣减。");
+      setActiveTab("inventory");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "领用登记失败。");
+    } finally {
+      setIsSubmitting(false);
     }
-    if (quantity > selectedBatch.remainingQuantity) {
-      setMessage(`领用量超过库存。当前可用 ${selectedBatch.remainingQuantity} ${selectedBatch.unit}。`);
-      return;
+  }
+
+  async function resetDemoData() {
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>("/api/reset-demo", { method: "POST" });
+      applyState(state);
+      setMessage("已恢复演示数据，并同步到服务器。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "恢复演示数据失败。");
+    } finally {
+      setIsSubmitting(false);
     }
-    const now = new Date().toISOString();
-    const record: UsageRecord = {
-      id: createId("usage"),
-      materialBatchId: selectedBatch.id,
-      materialName: selectedBatch.name,
-      batchNo: selectedBatch.batchNo,
-      userName: usageForm.userName.trim(),
-      usedDate: usageForm.usedDate,
-      usedQuantity: quantity,
-      purpose: usageForm.purpose.trim(),
-      notes: usageForm.notes.trim(),
-      createdAt: now,
-    };
-    setMaterials((current) =>
-      current.map((batch) =>
-        batch.id === selectedBatch.id
-          ? { ...batch, remainingQuantity: batch.remainingQuantity - quantity, updatedAt: now }
-          : batch,
-      ),
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <main className="app-shell auth-shell">
+        <section className="auth-panel">
+          <p className="eyebrow">科研物料管理</p>
+          <h1>实验室库存与领用台账</h1>
+          <form className="auth-form" onSubmit={handleLoginSubmit}>
+            <label>
+              试用密码
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="请输入共享密码"
+                required
+                disabled={isSubmitting || isLoading}
+              />
+            </label>
+            {message ? <div className="notice">{message}</div> : null}
+            <button className="primary" type="submit" disabled={isSubmitting || isLoading}>
+              {isLoading ? "正在检查登录状态" : "进入台账"}
+            </button>
+          </form>
+        </section>
+      </main>
     );
-    setUsageRecords((current) => [record, ...current]);
-    setUsageForm({ ...emptyUsage, usedDate: getTodayDate() });
-    setMessage("领用登记成功，剩余库存已同步扣减。");
-    setActiveTab("inventory");
-  }
-
-  function resetDemoData() {
-    setMaterials(initialMaterials);
-    setUsageRecords(initialUsage);
-    setMessage("已恢复演示数据。");
   }
 
   return (
@@ -368,6 +318,12 @@ export default function Home() {
           </button>
           <button className="secondary" onClick={() => exportCsv("领用记录.csv", usageRecords.map(formatUsageExport))}>
             导出流水
+          </button>
+          <button className="secondary" onClick={loadState} disabled={isSubmitting || isLoading}>
+            刷新
+          </button>
+          <button className="secondary" onClick={handleLogout} disabled={isSubmitting}>
+            退出
           </button>
         </div>
       </header>
@@ -437,7 +393,7 @@ export default function Home() {
         <section className="panel">
           <div className="panel-heading">
             <h2>物料入库</h2>
-            <button className="secondary" onClick={resetDemoData}>恢复演示数据</button>
+            <button className="secondary" onClick={resetDemoData} disabled={isSubmitting}>恢复演示数据</button>
           </div>
           <form className="form-grid" onSubmit={handleMaterialSubmit}>
             <TextInput label="物料名称" value={materialForm.name} onChange={(name) => setMaterialForm({ ...materialForm, name })} required />
@@ -456,7 +412,7 @@ export default function Home() {
               <textarea value={materialForm.notes} onChange={(event) => setMaterialForm({ ...materialForm, notes: event.target.value })} />
             </label>
             <div className="form-actions">
-              <button className="primary" type="submit">保存入库</button>
+              <button className="primary" type="submit" disabled={isSubmitting}>保存入库</button>
             </div>
           </form>
         </section>
@@ -501,7 +457,7 @@ export default function Home() {
               </div>
             ) : null}
             <div className="form-actions">
-              <button className="primary" type="submit">提交领用并扣减库存</button>
+              <button className="primary" type="submit" disabled={isSubmitting}>提交领用并扣减库存</button>
             </div>
           </form>
         </section>
@@ -518,17 +474,6 @@ export default function Home() {
       )}
     </main>
   );
-}
-
-function readStoredList<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  const stored = window.localStorage.getItem(key);
-  if (!stored) return fallback;
-  try {
-    return JSON.parse(stored) as T;
-  } catch {
-    return fallback;
-  }
 }
 
 function Stat({ label, value, tone = "default" }: { label: string; value: number; tone?: string }) {

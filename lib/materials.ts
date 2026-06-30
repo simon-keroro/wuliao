@@ -1,0 +1,144 @@
+export type MaterialBatch = {
+  id: string;
+  name: string;
+  category: string;
+  specification: string;
+  unit: string;
+  batchNo: string;
+  supplier: string;
+  storageLocation: string;
+  receivedDate: string;
+  expiryDate: string;
+  initialQuantity: number;
+  remainingQuantity: number;
+  minQuantity: number;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type UsageRecord = {
+  id: string;
+  materialBatchId: string;
+  materialName: string;
+  batchNo: string;
+  userName: string;
+  usedDate: string;
+  usedQuantity: number;
+  purpose: string;
+  notes: string;
+  createdAt: string;
+};
+
+export type InventoryState = {
+  materials: MaterialBatch[];
+  usageRecords: UsageRecord[];
+};
+
+export type MaterialInput = {
+  name?: string;
+  category?: string;
+  specification?: string;
+  unit?: string;
+  batchNo?: string;
+  supplier?: string;
+  storageLocation?: string;
+  receivedDate?: string;
+  expiryDate?: string;
+  initialQuantity?: string | number;
+  minQuantity?: string | number;
+  notes?: string;
+};
+
+export type UsageInput = {
+  materialBatchId?: string;
+  userName?: string;
+  usedDate?: string;
+  usedQuantity?: string | number;
+  purpose?: string;
+  notes?: string;
+};
+
+export const initialMaterials: MaterialBatch[] = [
+  {
+    id: "batch-ethanol-001",
+    name: "无水乙醇",
+    category: "试剂",
+    specification: "500 mL/瓶",
+    unit: "瓶",
+    batchNo: "ET20260601",
+    supplier: "国药试剂",
+    storageLocation: "试剂柜 A-02",
+    receivedDate: "2026-06-01",
+    expiryDate: "2026-08-15",
+    initialQuantity: 12,
+    remainingQuantity: 8,
+    minQuantity: 3,
+    notes: "易燃，避光保存",
+    createdAt: "2026-06-01T09:00:00.000Z",
+    updatedAt: "2026-06-18T09:00:00.000Z",
+  },
+  {
+    id: "batch-tip-001",
+    name: "移液枪吸头",
+    category: "耗材",
+    specification: "200 uL，96支/盒",
+    unit: "盒",
+    batchNo: "TIP2605",
+    supplier: "Axygen",
+    storageLocation: "耗材架 B-01",
+    receivedDate: "2026-05-20",
+    expiryDate: "2028-05-20",
+    initialQuantity: 40,
+    remainingQuantity: 6,
+    minQuantity: 8,
+    notes: "无菌盒装",
+    createdAt: "2026-05-20T09:00:00.000Z",
+    updatedAt: "2026-06-12T09:00:00.000Z",
+  },
+  {
+    id: "batch-buffer-001",
+    name: "PBS缓冲液",
+    category: "试剂",
+    specification: "1 L/瓶",
+    unit: "瓶",
+    batchNo: "PBS2604",
+    supplier: "实验室自配",
+    storageLocation: "4C冰箱 2层",
+    receivedDate: "2026-04-18",
+    expiryDate: "2026-06-20",
+    initialQuantity: 5,
+    remainingQuantity: 2,
+    minQuantity: 1,
+    notes: "已过期，仅保留记录",
+    createdAt: "2026-04-18T09:00:00.000Z",
+    updatedAt: "2026-06-10T09:00:00.000Z",
+  },
+];
+
+export const initialUsage: UsageRecord[] = [
+  {
+    id: "usage-001",
+    materialBatchId: "batch-ethanol-001",
+    materialName: "无水乙醇",
+    batchNo: "ET20260601",
+    userName: "王珂",
+    usedDate: "2026-06-18",
+    usedQuantity: 4,
+    purpose: "样品清洗",
+    notes: "常规实验",
+    createdAt: "2026-06-18T09:00:00.000Z",
+  },
+  {
+    id: "usage-002",
+    materialBatchId: "batch-tip-001",
+    materialName: "移液枪吸头",
+    batchNo: "TIP2605",
+    userName: "李研",
+    usedDate: "2026-06-12",
+    usedQuantity: 34,
+    purpose: "细胞培养",
+    notes: "周消耗",
+    createdAt: "2026-06-12T09:00:00.000Z",
+  },
+];
