@@ -65,6 +65,10 @@ export type MaterialInput = {
   notes?: string;
 };
 
+export type MaterialUpdateInput = MaterialInput & {
+  id?: string;
+};
+
 export type UsageInput = {
   materialBatchId?: string;
   userName?: string;

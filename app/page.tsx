@@ -127,6 +127,7 @@ export default function Home() {
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
   const [reservationRecords, setReservationRecords] = useState<ReservationRecord[]>([]);
   const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
+  const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [reservationForm, setReservationForm] = useState(() => ({ ...emptyReservation, expectedDate: getTodayDate() }));
   const [password, setPassword] = useState("");
@@ -178,6 +179,7 @@ export default function Home() {
   );
 
   const selectedBatch = materials.find((batch) => batch.id === usageForm.materialBatchId);
+  const isEditingMaterial = Boolean(editingMaterialId);
 
   const stats = useMemo(() => {
     return {
@@ -268,18 +270,53 @@ export default function Home() {
     setIsSubmitting(true);
     try {
       const state = await requestJson<InventoryState>("/api/materials", {
-        method: "POST",
-        body: JSON.stringify(materialForm),
+        method: isEditingMaterial ? "PUT" : "POST",
+        body: JSON.stringify(isEditingMaterial ? { ...materialForm, id: editingMaterialId } : materialForm),
       });
       applyState(state);
+      setEditingMaterialId(null);
       setMaterialForm({ ...emptyMaterial, receivedDate: getTodayDate() });
-      setMessage("入库成功，库存已同步到服务器。");
+      setMessage(isEditingMaterial ? "物料元数据已更新，库存总览已同步。" : "入库成功，库存已同步到服务器。");
       setActiveTab("inventory");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "入库失败。");
+      setMessage(error instanceof Error ? error.message : isEditingMaterial ? "保存修改失败。" : "入库失败。");
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function startNewMaterial() {
+    setEditingMaterialId(null);
+    setMaterialForm({ ...emptyMaterial, receivedDate: getTodayDate() });
+    setActiveTab("intake");
+  }
+
+  function startEditMaterial(batch: MaterialBatch) {
+    setEditingMaterialId(batch.id);
+    setMaterialForm({
+      sapNo: batch.sapNo,
+      name: batch.name,
+      category: batch.category,
+      specification: batch.specification,
+      unit: batch.unit,
+      batchNo: batch.batchNo,
+      supplier: batch.supplier,
+      storageLocation: batch.storageLocation,
+      receivedDate: batch.receivedDate || getTodayDate(),
+      expiryDate: batch.expiryDate,
+      initialQuantity: String(batch.initialQuantity),
+      minQuantity: String(batch.minQuantity),
+      notes: batch.notes,
+    });
+    setMessage("正在编辑库存物料，请补充或修正元数据后保存。");
+    setActiveTab("intake");
+  }
+
+  function cancelEditMaterial() {
+    setEditingMaterialId(null);
+    setMaterialForm({ ...emptyMaterial, receivedDate: getTodayDate() });
+    setMessage("");
+    setActiveTab("inventory");
   }
 
   async function handleUsageSubmit(event: FormEvent<HTMLFormElement>) {
@@ -315,6 +352,23 @@ export default function Home() {
       setActiveTab("reservationList");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "提交预约失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleReceiveReservation(record: ReservationRecord) {
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>("/api/reservations", {
+        method: "PATCH",
+        body: JSON.stringify({ id: record.id, action: "receive" }),
+      });
+      applyState(state);
+      setMessage(`${record.materialName} 已确认从仓储领取，并自动完成入库。`);
+      setActiveTab("inventory");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "确认领取失败。");
     } finally {
       setIsSubmitting(false);
     }
@@ -441,17 +495,22 @@ export default function Home() {
         <section className="panel">
           <div className="panel-heading">
             <h2>库存总览</h2>
-            <button className="primary" onClick={() => setActiveTab("intake")}>新增入库</button>
+            <button className="primary" onClick={startNewMaterial}>新增入库</button>
           </div>
-          <InventoryTable materials={filteredMaterials} />
+          <InventoryTable materials={filteredMaterials} onEdit={startEditMaterial} />
         </section>
       )}
 
       {activeTab === "intake" && (
         <section className="panel">
           <div className="panel-heading">
-            <h2>物料入库</h2>
-            <button className="secondary" onClick={resetDemoData} disabled={isSubmitting}>恢复演示数据</button>
+            <h2>{isEditingMaterial ? "编辑物料元数据" : "物料入库"}</h2>
+            <div className="panel-actions">
+              {isEditingMaterial ? (
+                <button className="secondary" type="button" onClick={cancelEditMaterial} disabled={isSubmitting}>取消编辑</button>
+              ) : null}
+              <button className="secondary" onClick={resetDemoData} disabled={isSubmitting}>恢复演示数据</button>
+            </div>
           </div>
           <form className="form-grid" onSubmit={handleMaterialSubmit}>
             <TextInput label="SAP号" value={materialForm.sapNo} onChange={(sapNo) => setMaterialForm({ ...materialForm, sapNo })} placeholder="8位数字" pattern="[0-9]{8}" maxLength={8} />
@@ -471,7 +530,7 @@ export default function Home() {
               <textarea value={materialForm.notes} onChange={(event) => setMaterialForm({ ...materialForm, notes: event.target.value })} />
             </label>
             <div className="form-actions">
-              <button className="primary" type="submit" disabled={isSubmitting}>保存入库</button>
+              <button className="primary" type="submit" disabled={isSubmitting}>{isEditingMaterial ? "保存修改" : "保存入库"}</button>
             </div>
           </form>
         </section>
@@ -557,7 +616,7 @@ export default function Home() {
             <h2>预约清单</h2>
             <button className="secondary" onClick={() => exportCsv("仓储领料预约清单.csv", filteredReservations.map(formatReservationExport))}>导出Excel</button>
           </div>
-          <ReservationsTable records={filteredReservations} />
+          <ReservationsTable records={filteredReservations} onReceive={handleReceiveReservation} isSubmitting={isSubmitting} />
         </section>
       )}
 
@@ -643,7 +702,7 @@ function TextInput({
   );
 }
 
-function InventoryTable({ materials }: { materials: MaterialBatch[] }) {
+function InventoryTable({ materials, onEdit }: { materials: MaterialBatch[]; onEdit: (batch: MaterialBatch) => void }) {
   return (
     <div className="table-wrap">
       <table>
@@ -658,6 +717,7 @@ function InventoryTable({ materials }: { materials: MaterialBatch[] }) {
             <th>入库 / 有效期</th>
             <th>库存</th>
             <th>状态</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -686,6 +746,9 @@ function InventoryTable({ materials }: { materials: MaterialBatch[] }) {
                 <td>
                   <Badge tone={expiry.tone}>{expiry.label}</Badge>
                   <Badge tone={stock.tone}>{stock.label}</Badge>
+                </td>
+                <td>
+                  <button className="table-action" type="button" onClick={() => onEdit(batch)}>编辑</button>
                 </td>
               </tr>
             );
@@ -733,7 +796,15 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
   );
 }
 
-function ReservationsTable({ records }: { records: ReservationRecord[] }) {
+function ReservationsTable({
+  records,
+  onReceive,
+  isSubmitting,
+}: {
+  records: ReservationRecord[];
+  onReceive: (record: ReservationRecord) => void;
+  isSubmitting: boolean;
+}) {
   return (
     <div className="table-wrap">
       <table>
@@ -747,6 +818,7 @@ function ReservationsTable({ records }: { records: ReservationRecord[] }) {
             <th>数量</th>
             <th>单位</th>
             <th>提交时间</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -760,6 +832,11 @@ function ReservationsTable({ records }: { records: ReservationRecord[] }) {
               <td>{record.quantity}</td>
               <td>{record.unit}</td>
               <td>{record.createdAt.slice(0, 10)}</td>
+              <td>
+                <button className="table-action" type="button" onClick={() => onReceive(record)} disabled={isSubmitting}>
+                  已从仓储领取
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>

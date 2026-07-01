@@ -112,7 +112,8 @@ h2 {
 
 .top-actions,
 .form-actions,
-.panel-heading {
+.panel-heading,
+.panel-actions {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -149,7 +150,8 @@ h2 {
 }
 
 .secondary:hover,
-.tab:hover {
+.tab:hover,
+.table-action:hover {
   border-color: var(--primary);
 }
 
@@ -276,6 +278,11 @@ h2 {
   margin-bottom: 16px;
 }
 
+.panel-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .panel-heading p {
   color: var(--muted);
   font-size: 14px;
@@ -353,7 +360,7 @@ textarea:focus {
 
 table {
   width: 100%;
-  min-width: 1120px;
+  min-width: 1220px;
   border-collapse: collapse;
 }
 
@@ -380,6 +387,18 @@ td {
 td strong {
   display: block;
   margin-bottom: 4px;
+}
+
+.table-action {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--primary);
+  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 small {
@@ -483,8 +502,13 @@ small {
     flex-direction: column;
   }
 
+  .panel-actions {
+    width: 100%;
+  }
+
   .primary,
-  .secondary {
+  .secondary,
+  .panel-actions .secondary {
     width: 100%;
   }
 }

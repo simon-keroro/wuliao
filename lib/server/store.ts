@@ -8,6 +8,7 @@ import {
   type InventoryState,
   type MaterialBatch,
   type MaterialInput,
+  type MaterialUpdateInput,
   type ReservationInput,
   type ReservationRecord,
   type UsageInput,
@@ -275,6 +276,34 @@ function insertReservation(db: DatabaseSync, record: ReservationRecord) {
   );
 }
 
+function updateMaterialRow(db: DatabaseSync, batch: MaterialBatch) {
+  db.prepare(`
+    UPDATE materials
+    SET sap_no = ?, name = ?, category = ?, specification = ?, unit = ?,
+      batch_no = ?, supplier = ?, storage_location = ?, received_date = ?,
+      expiry_date = ?, initial_quantity = ?, remaining_quantity = ?,
+      min_quantity = ?, notes = ?, updated_at = ?
+    WHERE id = ?
+  `).run(
+    batch.sapNo,
+    batch.name,
+    batch.category,
+    batch.specification,
+    batch.unit,
+    batch.batchNo,
+    batch.supplier,
+    batch.storageLocation,
+    batch.receivedDate,
+    batch.expiryDate,
+    batch.initialQuantity,
+    batch.remainingQuantity,
+    batch.minQuantity,
+    batch.notes,
+    batch.updatedAt,
+    batch.id,
+  );
+}
+
 function resetDemoData(db = getDatabase()) {
   db.exec("BEGIN IMMEDIATE;");
   try {
@@ -303,6 +332,27 @@ function requiredText(value: string | undefined) {
   return value?.trim() ?? "";
 }
 
+function validateMaterialInput(input: MaterialInput) {
+  const quantity = positiveNumber(input.initialQuantity);
+  const minQuantity = positiveNumber(input.minQuantity ?? 0);
+  const sapNo = requiredText(input.sapNo);
+  const name = requiredText(input.name);
+
+  if (sapNo && !isEightDigitSapNo(sapNo)) {
+    throw new Error("SAP号必须是 8 位数字。");
+  }
+  if (!name || quantity <= 0) {
+    throw new Error("请填写物料名称，并填写大于 0 的入库数量。");
+  }
+
+  return {
+    quantity,
+    minQuantity: Number.isFinite(minQuantity) ? minQuantity : 0,
+    sapNo,
+    name,
+  };
+}
+
 function daysUntil(dateValue: string) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -325,20 +375,10 @@ export function getInventoryState(): InventoryState {
 }
 
 export function createMaterial(input: MaterialInput): InventoryState {
-  const quantity = positiveNumber(input.initialQuantity);
-  const minQuantity = positiveNumber(input.minQuantity ?? 0);
-  const sapNo = requiredText(input.sapNo);
-  const name = requiredText(input.name);
+  const { quantity, minQuantity, sapNo, name } = validateMaterialInput(input);
   const batchNo = requiredText(input.batchNo);
   const unit = requiredText(input.unit);
   const expiryDate = requiredText(input.expiryDate);
-
-  if (sapNo && !isEightDigitSapNo(sapNo)) {
-    throw new Error("SAP号必须是 8 位数字。");
-  }
-  if (!name || quantity <= 0) {
-    throw new Error("请填写物料名称，并填写大于 0 的入库数量。");
-  }
 
   const now = new Date().toISOString();
   const batch: MaterialBatch = {
@@ -355,13 +395,50 @@ export function createMaterial(input: MaterialInput): InventoryState {
     expiryDate,
     initialQuantity: quantity,
     remainingQuantity: quantity,
-    minQuantity: Number.isFinite(minQuantity) ? minQuantity : 0,
+    minQuantity,
     notes: requiredText(input.notes),
     createdAt: now,
     updatedAt: now,
   };
 
   insertMaterial(getDatabase(), batch);
+  return getInventoryState();
+}
+
+export function updateMaterial(input: MaterialUpdateInput): InventoryState {
+  const db = getDatabase();
+  const id = requiredText(input.id);
+  if (!id) throw new Error("缺少要编辑的库存批次。");
+
+  const current = db.prepare("SELECT * FROM materials WHERE id = ?").get(id) as MaterialRow | undefined;
+  if (!current) throw new Error("所选库存批次不存在，请刷新页面后重试。");
+
+  const { quantity, minQuantity, sapNo, name } = validateMaterialInput(input);
+  const consumedQuantity = Math.max(0, current.initial_quantity - current.remaining_quantity);
+  const remainingQuantity = Math.max(0, quantity - consumedQuantity);
+  const now = new Date().toISOString();
+
+  const batch: MaterialBatch = {
+    id: current.id,
+    sapNo,
+    name,
+    category: requiredText(input.category) || "未分类",
+    specification: requiredText(input.specification),
+    unit: requiredText(input.unit),
+    batchNo: requiredText(input.batchNo),
+    supplier: requiredText(input.supplier),
+    storageLocation: requiredText(input.storageLocation),
+    receivedDate: requiredText(input.receivedDate) || now.slice(0, 10),
+    expiryDate: requiredText(input.expiryDate),
+    initialQuantity: quantity,
+    remainingQuantity,
+    minQuantity,
+    notes: requiredText(input.notes),
+    createdAt: current.created_at,
+    updatedAt: now,
+  };
+
+  updateMaterialRow(db, batch);
   return getInventoryState();
 }
 
@@ -440,6 +517,59 @@ export function createReservation(input: ReservationInput): InventoryState {
     createdAt: new Date().toISOString(),
   };
   insertReservation(getDatabase(), record);
+  return getInventoryState();
+}
+
+export function receiveReservation(reservationId: string): InventoryState {
+  const db = getDatabase();
+  const id = requiredText(reservationId);
+  if (!id) throw new Error("缺少要确认领取的预约记录。");
+
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const reservation = db.prepare("SELECT * FROM reservation_records WHERE id = ?").get(id) as
+      | ReservationRow
+      | undefined;
+    if (!reservation) throw new Error("所选预约记录不存在，请刷新页面后重试。");
+
+    const template = (
+      reservation.sap_no
+        ? db
+            .prepare("SELECT * FROM materials WHERE sap_no = ? ORDER BY created_at DESC, id DESC LIMIT 1")
+            .get(reservation.sap_no)
+        : db
+            .prepare("SELECT * FROM materials WHERE name = ? ORDER BY created_at DESC, id DESC LIMIT 1")
+            .get(reservation.material_name)
+    ) as MaterialRow | undefined;
+    const now = new Date().toISOString();
+    const batch: MaterialBatch = {
+      id: `batch-${randomUUID()}`,
+      sapNo: reservation.sap_no,
+      name: reservation.material_name,
+      category: template?.category || "未分类",
+      specification: template?.specification || "",
+      unit: reservation.unit,
+      batchNo: "",
+      supplier: "仓储部",
+      storageLocation: template?.storage_location || "科研开放部待分配",
+      receivedDate: now.slice(0, 10),
+      expiryDate: "",
+      initialQuantity: reservation.quantity,
+      remainingQuantity: reservation.quantity,
+      minQuantity: template?.min_quantity ?? 0,
+      notes: reservation.requester ? `由 ${reservation.requester} 预约，从仓储领取。` : "从仓储领取。",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    insertMaterial(db, batch);
+    db.prepare("DELETE FROM reservation_records WHERE id = ?").run(id);
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+
   return getInventoryState();
 }
 
