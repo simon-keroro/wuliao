@@ -41,6 +41,7 @@ export type ReservationRecord = {
   quantity: number;
   expectedDate: string;
   receivedAt: string;
+  receivedBatchId: string;
   createdAt: string;
 };
 

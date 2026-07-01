@@ -1,6 +1,6 @@
 import type { ReservationInput } from "@/lib/materials";
 import { jsonError, requireAuth } from "@/lib/server/http";
-import { createReservation, receiveReservation } from "@/lib/server/store";
+import { createReservation, receiveReservation, undoReceiveReservation } from "@/lib/server/store";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +22,13 @@ export async function PATCH(request: Request) {
 
   try {
     const payload = (await request.json()) as { id?: string; action?: string };
-    if (payload.action !== "receive") {
-      throw new Error("不支持的预约操作。");
+    if (payload.action === "receive") {
+      return Response.json(receiveReservation(payload.id ?? ""));
     }
-    return Response.json(receiveReservation(payload.id ?? ""));
+    if (payload.action === "undoReceive") {
+      return Response.json(undoReceiveReservation(payload.id ?? ""));
+    }
+    throw new Error("不支持的预约操作。");
   } catch (error) {
     return jsonError(error, 400);
   }

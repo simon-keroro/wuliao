@@ -58,6 +58,7 @@ type ReservationRow = {
   quantity: number;
   expected_date: string;
   received_at: string;
+  received_batch_id: string;
   created_at: string;
 };
 
@@ -128,6 +129,7 @@ function getDatabase() {
       quantity REAL NOT NULL,
       expected_date TEXT NOT NULL,
       received_at TEXT NOT NULL DEFAULT '',
+      received_batch_id TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL
     );
 
@@ -140,6 +142,7 @@ function getDatabase() {
   ensureColumn(db, "materials", "sap_no", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "sap_no", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "reservation_records", "received_at", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "reservation_records", "received_batch_id", "TEXT NOT NULL DEFAULT ''");
 
   cachedDb = db;
   seedDatabaseIfEmpty(db);
@@ -207,6 +210,7 @@ function reservationFromRow(row: ReservationRow): ReservationRecord {
     quantity: row.quantity,
     expectedDate: row.expected_date,
     receivedAt: row.received_at,
+    receivedBatchId: row.received_batch_id,
     createdAt: row.created_at,
   };
 }
@@ -265,9 +269,10 @@ function insertUsage(db: DatabaseSync, record: UsageRecord) {
 function insertReservation(db: DatabaseSync, record: ReservationRecord) {
   db.prepare(`
     INSERT INTO reservation_records (
-      id, requester, sap_no, material_name, unit, quantity, expected_date, received_at, created_at
+      id, requester, sap_no, material_name, unit, quantity, expected_date,
+      received_at, received_batch_id, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     record.id,
     record.requester,
@@ -277,6 +282,7 @@ function insertReservation(db: DatabaseSync, record: ReservationRecord) {
     record.quantity,
     record.expectedDate,
     record.receivedAt,
+    record.receivedBatchId,
     record.createdAt,
   );
 }
@@ -363,6 +369,35 @@ function daysUntil(dateValue: string) {
   today.setHours(0, 0, 0, 0);
   const target = new Date(`${dateValue}T00:00:00`);
   return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function findReceivedBatchId(db: DatabaseSync, reservation: ReservationRow) {
+  if (reservation.received_batch_id) return reservation.received_batch_id;
+  if (!reservation.received_at) return "";
+
+  const row = db
+    .prepare(
+      `
+        SELECT id FROM materials
+        WHERE created_at = ?
+          AND sap_no = ?
+          AND name = ?
+          AND unit = ?
+          AND initial_quantity = ?
+          AND supplier = '仓储部'
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      `,
+    )
+    .get(
+      reservation.received_at,
+      reservation.sap_no,
+      reservation.material_name,
+      reservation.unit,
+      reservation.quantity,
+    ) as { id: string } | undefined;
+
+  return row?.id ?? "";
 }
 
 export function getInventoryState(): InventoryState {
@@ -541,6 +576,7 @@ export function createReservation(input: ReservationInput): InventoryState {
     quantity,
     expectedDate,
     receivedAt: "",
+    receivedBatchId: "",
     createdAt: new Date().toISOString(),
   };
   insertReservation(getDatabase(), record);
@@ -573,8 +609,9 @@ export function receiveReservation(reservationId: string): InventoryState {
             .get(reservation.material_name)
     ) as MaterialRow | undefined;
     const now = new Date().toISOString();
+    const batchId = `batch-${randomUUID()}`;
     const batch: MaterialBatch = {
-      id: `batch-${randomUUID()}`,
+      id: batchId,
       sapNo: reservation.sap_no,
       name: reservation.material_name,
       category: template?.category || "未分类",
@@ -594,7 +631,48 @@ export function receiveReservation(reservationId: string): InventoryState {
     };
 
     insertMaterial(db, batch);
-    db.prepare("UPDATE reservation_records SET received_at = ? WHERE id = ?").run(now, id);
+    db.prepare("UPDATE reservation_records SET received_at = ?, received_batch_id = ? WHERE id = ?").run(
+      now,
+      batchId,
+      id,
+    );
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+
+  return getInventoryState();
+}
+
+export function undoReceiveReservation(reservationId: string): InventoryState {
+  const db = getDatabase();
+  const id = requiredText(reservationId);
+  if (!id) throw new Error("缺少要撤销的预约记录。");
+
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const reservation = db.prepare("SELECT * FROM reservation_records WHERE id = ?").get(id) as
+      | ReservationRow
+      | undefined;
+    if (!reservation) throw new Error("所选预约记录不存在，请刷新页面后重试。");
+    if (!reservation.received_at) {
+      db.exec("COMMIT;");
+      return getInventoryState();
+    }
+
+    const batchId = findReceivedBatchId(db, reservation);
+    if (!batchId) throw new Error("找不到该预约自动生成的入库批次，无法撤销。");
+
+    const usageCount = db
+      .prepare("SELECT COUNT(*) AS count FROM usage_records WHERE material_batch_id = ?")
+      .get(batchId) as { count: number };
+    if (usageCount.count > 0) {
+      throw new Error("该入库批次已有领用记录，不能撤销入研发库。");
+    }
+
+    db.prepare("DELETE FROM materials WHERE id = ?").run(batchId);
+    db.prepare("UPDATE reservation_records SET received_at = '', received_batch_id = '' WHERE id = ?").run(id);
     db.exec("COMMIT;");
   } catch (error) {
     db.exec("ROLLBACK;");

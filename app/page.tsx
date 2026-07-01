@@ -355,18 +355,23 @@ export default function Home() {
     }
   }
 
-  async function handleReceiveReservation(record: ReservationRecord) {
+  async function handleToggleReservationReceipt(record: ReservationRecord) {
+    const isReceived = Boolean(record.receivedAt);
     setIsSubmitting(true);
     try {
       const state = await requestJson<InventoryState>("/api/reservations", {
         method: "PATCH",
-        body: JSON.stringify({ id: record.id, action: "receive" }),
+        body: JSON.stringify({ id: record.id, action: isReceived ? "undoReceive" : "receive" }),
       });
       applyState(state);
-      setMessage(`${record.materialName} 已确认从仓储领取，并自动完成入库；预约记录已保留。`);
-      setActiveTab("inventory");
+      setMessage(
+        isReceived
+          ? `${record.materialName} 已撤销入研发库，预约状态已恢复。`
+          : `${record.materialName} 已确认需从仓储领取，并自动完成入库；预约记录已保留。`,
+      );
+      setActiveTab("reservationList");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "确认领取失败。");
+      setMessage(error instanceof Error ? error.message : isReceived ? "撤销入研发库失败。" : "确认领取失败。");
     } finally {
       setIsSubmitting(false);
     }
@@ -617,7 +622,7 @@ export default function Home() {
             <h2>预约清单</h2>
             <button className="secondary" onClick={() => exportCsv("仓储领料预约清单.csv", filteredReservations.map(formatReservationExport))}>导出Excel</button>
           </div>
-          <ReservationsTable records={filteredReservations} onReceive={handleReceiveReservation} isSubmitting={isSubmitting} />
+          <ReservationsTable records={filteredReservations} onToggleReceipt={handleToggleReservationReceipt} isSubmitting={isSubmitting} />
         </section>
       )}
 
@@ -829,11 +834,11 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
 
 function ReservationsTable({
   records,
-  onReceive,
+  onToggleReceipt,
   isSubmitting,
 }: {
   records: ReservationRecord[];
-  onReceive: (record: ReservationRecord) => void;
+  onToggleReceipt: (record: ReservationRecord) => void;
   isSubmitting: boolean;
 }) {
   return (
@@ -869,10 +874,10 @@ function ReservationsTable({
                   <button
                     className={`table-action ${isReceived ? "table-action-muted" : ""}`}
                     type="button"
-                    onClick={() => onReceive(record)}
-                    disabled={isSubmitting || isReceived}
+                    onClick={() => onToggleReceipt(record)}
+                    disabled={isSubmitting}
                   >
-                    {isReceived ? "已入研发库" : "已从仓储领取"}
+                    {isReceived ? "已入研发库" : "需从仓储领取"}
                   </button>
                   {isReceived ? <small>{record.receivedAt.slice(0, 10)}</small> : null}
                 </td>
