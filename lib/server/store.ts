@@ -333,11 +333,11 @@ export function createMaterial(input: MaterialInput): InventoryState {
   const unit = requiredText(input.unit);
   const expiryDate = requiredText(input.expiryDate);
 
-  if (!isEightDigitSapNo(sapNo)) {
+  if (sapNo && !isEightDigitSapNo(sapNo)) {
     throw new Error("SAP号必须是 8 位数字。");
   }
-  if (!name || !batchNo || !unit || !expiryDate || quantity <= 0) {
-    throw new Error("请补全SAP号、物料名称、批号、单位、有效期，并填写大于 0 的入库数量。");
+  if (!name || quantity <= 0) {
+    throw new Error("请填写物料名称，并填写大于 0 的入库数量。");
   }
 
   const now = new Date().toISOString();
@@ -422,10 +422,10 @@ export function createReservation(input: ReservationInput): InventoryState {
   const quantity = positiveNumber(input.quantity);
   const expectedDate = requiredText(input.expectedDate);
 
-  if (!requester || !materialName || !unit || !expectedDate || quantity <= 0) {
-    throw new Error("请补全预约人、物料名称、单位、数量和期望入库日期。");
+  if (!materialName || quantity <= 0) {
+    throw new Error("请填写物料名称，并填写大于 0 的数量。");
   }
-  if (!isEightDigitSapNo(sapNo)) {
+  if (sapNo && !isEightDigitSapNo(sapNo)) {
     throw new Error("SAP号必须是 8 位数字。");
   }
 

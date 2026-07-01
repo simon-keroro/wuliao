@@ -335,7 +335,7 @@ export default function Home() {
       <main className="app-shell auth-shell">
         <section className="auth-panel">
           <p className="eyebrow">科研物料管理</p>
-          <h1>科研开发部物料管理系统</h1>
+          <h1>科研开发部物料管理系统V3</h1>
           <form className="auth-form" onSubmit={handleLoginSubmit}>
             <label>
               试用密码
@@ -451,16 +451,16 @@ export default function Home() {
             <button className="secondary" onClick={resetDemoData} disabled={isSubmitting}>恢复演示数据</button>
           </div>
           <form className="form-grid" onSubmit={handleMaterialSubmit}>
-            <TextInput label="SAP号" value={materialForm.sapNo} onChange={(sapNo) => setMaterialForm({ ...materialForm, sapNo })} required placeholder="8位数字" pattern="\\d{8}" maxLength={8} />
+            <TextInput label="SAP号" value={materialForm.sapNo} onChange={(sapNo) => setMaterialForm({ ...materialForm, sapNo })} placeholder="8位数字" pattern="[0-9]{8}" maxLength={8} />
             <TextInput label="物料名称" value={materialForm.name} onChange={(name) => setMaterialForm({ ...materialForm, name })} required />
             <TextInput label="分类" value={materialForm.category} onChange={(category) => setMaterialForm({ ...materialForm, category })} placeholder="试剂 / 耗材 / 标准品" />
             <TextInput label="规格" value={materialForm.specification} onChange={(specification) => setMaterialForm({ ...materialForm, specification })} placeholder="500 mL/瓶" />
-            <TextInput label="单位" value={materialForm.unit} onChange={(unit) => setMaterialForm({ ...materialForm, unit })} required placeholder="瓶 / 盒 / g" />
-            <TextInput label="批号" value={materialForm.batchNo} onChange={(batchNo) => setMaterialForm({ ...materialForm, batchNo })} required />
+            <TextInput label="单位" value={materialForm.unit} onChange={(unit) => setMaterialForm({ ...materialForm, unit })} placeholder="瓶 / 盒 / g" />
+            <TextInput label="批号" value={materialForm.batchNo} onChange={(batchNo) => setMaterialForm({ ...materialForm, batchNo })} />
             <TextInput label="供应商" value={materialForm.supplier} onChange={(supplier) => setMaterialForm({ ...materialForm, supplier })} />
             <TextInput label="存放位置" value={materialForm.storageLocation} onChange={(storageLocation) => setMaterialForm({ ...materialForm, storageLocation })} placeholder="试剂柜 A-02" />
             <TextInput label="入库日期" type="date" value={materialForm.receivedDate} onChange={(receivedDate) => setMaterialForm({ ...materialForm, receivedDate })} />
-            <TextInput label="有效期" type="date" value={materialForm.expiryDate} onChange={(expiryDate) => setMaterialForm({ ...materialForm, expiryDate })} required />
+            <TextInput label="有效期" type="date" value={materialForm.expiryDate} onChange={(expiryDate) => setMaterialForm({ ...materialForm, expiryDate })} />
             <TextInput label="入库数量" type="number" value={materialForm.initialQuantity} onChange={(initialQuantity) => setMaterialForm({ ...materialForm, initialQuantity })} required min="0" step="0.01" />
             <TextInput label="最低库存" type="number" value={materialForm.minQuantity} onChange={(minQuantity) => setMaterialForm({ ...materialForm, minQuantity })} min="0" step="0.01" />
             <label className="wide">
@@ -527,10 +527,10 @@ export default function Home() {
             <p>提交后进入预约清单，便于物料管理员提前安排本周领料。</p>
           </div>
           <form className="form-grid" onSubmit={handleReservationSubmit}>
-            <TextInput label="预约人" value={reservationForm.requester} onChange={(requester) => setReservationForm({ ...reservationForm, requester })} required />
-            <TextInput label="SAP号" value={reservationForm.sapNo} onChange={(sapNo) => setReservationForm({ ...reservationForm, sapNo })} required placeholder="8位数字" pattern="\\d{8}" maxLength={8} />
+            <TextInput label="预约人" value={reservationForm.requester} onChange={(requester) => setReservationForm({ ...reservationForm, requester })} />
+            <TextInput label="SAP号" value={reservationForm.sapNo} onChange={(sapNo) => setReservationForm({ ...reservationForm, sapNo })} placeholder="8位数字" pattern="[0-9]{8}" maxLength={8} />
             <TextInput label="物料名称" value={reservationForm.materialName} onChange={(materialName) => setReservationForm({ ...reservationForm, materialName })} required />
-            <TextInput label="单位" value={reservationForm.unit} onChange={(unit) => setReservationForm({ ...reservationForm, unit })} required placeholder="瓶 / 盒 / g" />
+            <TextInput label="单位" value={reservationForm.unit} onChange={(unit) => setReservationForm({ ...reservationForm, unit })} placeholder="瓶 / 盒 / g" />
             <TextInput label="数量" type="number" value={reservationForm.quantity} onChange={(quantity) => setReservationForm({ ...reservationForm, quantity })} required min="0" step="0.01" />
             <label>
               期望入库日期
@@ -538,7 +538,6 @@ export default function Home() {
                 type="date"
                 value={reservationForm.expectedDate}
                 onChange={(event) => setReservationForm({ ...reservationForm, expectedDate: event.target.value })}
-                required
               />
               <small>{reservationForm.expectedDate ? formatWeekday(reservationForm.expectedDate) : ""}</small>
             </label>
