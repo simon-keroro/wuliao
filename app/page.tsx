@@ -8,6 +8,9 @@ type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
 
 const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
+const APP_TITLE = "科研开发部物料管理系统";
+const APP_VERSION = "V03";
+const APP_DISPLAY_TITLE = `${APP_TITLE} ${APP_VERSION}`;
 
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
@@ -335,7 +338,7 @@ export default function Home() {
       <main className="app-shell auth-shell">
         <section className="auth-panel">
           <p className="eyebrow">科研物料管理</p>
-          <h1>科研开发部物料管理系统V3</h1>
+          <h1>{APP_DISPLAY_TITLE}</h1>
           <form className="auth-form" onSubmit={handleLoginSubmit}>
             <label>
               试用密码
@@ -363,7 +366,7 @@ export default function Home() {
       <header className="topbar">
         <div>
           <p className="eyebrow">科研物料管理</p>
-          <h1>科研开发部物料管理系统</h1>
+          <h1>{APP_DISPLAY_TITLE}</h1>
         </div>
         <div className="top-actions">
           <button className="secondary" onClick={() => exportCsv("库存总览.csv", materials.map(formatMaterialExport))}>
