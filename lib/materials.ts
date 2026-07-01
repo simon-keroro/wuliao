@@ -40,6 +40,7 @@ export type ReservationRecord = {
   unit: string;
   quantity: number;
   expectedDate: string;
+  receivedAt: string;
   createdAt: string;
 };
 

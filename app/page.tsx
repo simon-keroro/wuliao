@@ -363,7 +363,7 @@ export default function Home() {
         body: JSON.stringify({ id: record.id, action: "receive" }),
       });
       applyState(state);
-      setMessage(`${record.materialName} 已确认从仓储领取，并自动完成入库。`);
+      setMessage(`${record.materialName} 已确认从仓储领取，并自动完成入库；预约记录已保留。`);
       setActiveTab("inventory");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "确认领取失败。");
@@ -853,23 +853,32 @@ function ReservationsTable({
           </tr>
         </thead>
         <tbody>
-          {records.map((record) => (
-            <tr key={record.id}>
-              <td>{record.expectedDate}</td>
-              <td>{formatWeekday(record.expectedDate)}</td>
-              <td>{record.requester}</td>
-              <td><strong>{record.sapNo}</strong></td>
-              <td>{record.materialName}</td>
-              <td>{record.quantity}</td>
-              <td>{record.unit}</td>
-              <td>{record.createdAt.slice(0, 10)}</td>
-              <td>
-                <button className="table-action" type="button" onClick={() => onReceive(record)} disabled={isSubmitting}>
-                  已从仓储领取
-                </button>
-              </td>
-            </tr>
-          ))}
+          {records.map((record) => {
+            const isReceived = Boolean(record.receivedAt);
+            return (
+              <tr key={record.id}>
+                <td>{record.expectedDate}</td>
+                <td>{formatWeekday(record.expectedDate)}</td>
+                <td>{record.requester}</td>
+                <td><strong>{record.sapNo}</strong></td>
+                <td>{record.materialName}</td>
+                <td>{record.quantity}</td>
+                <td>{record.unit}</td>
+                <td>{record.createdAt.slice(0, 10)}</td>
+                <td>
+                  <button
+                    className={`table-action ${isReceived ? "table-action-muted" : ""}`}
+                    type="button"
+                    onClick={() => onReceive(record)}
+                    disabled={isSubmitting || isReceived}
+                  >
+                    {isReceived ? "已入研发库" : "已从仓储领取"}
+                  </button>
+                  {isReceived ? <small>{record.receivedAt.slice(0, 10)}</small> : null}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {records.length === 0 ? <p className="empty">暂无领料预约。</p> : null}
@@ -925,6 +934,8 @@ function formatReservationExport(record: ReservationRecord) {
     物料名称: record.materialName,
     数量: record.quantity,
     单位: record.unit,
+    状态: record.receivedAt ? "已入研发库" : "待领取",
+    入研发库时间: record.receivedAt,
     提交时间: record.createdAt,
   };
 }

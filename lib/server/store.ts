@@ -57,6 +57,7 @@ type ReservationRow = {
   unit: string;
   quantity: number;
   expected_date: string;
+  received_at: string;
   created_at: string;
 };
 
@@ -126,6 +127,7 @@ function getDatabase() {
       unit TEXT NOT NULL,
       quantity REAL NOT NULL,
       expected_date TEXT NOT NULL,
+      received_at TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL
     );
 
@@ -137,6 +139,7 @@ function getDatabase() {
   `);
   ensureColumn(db, "materials", "sap_no", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "sap_no", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "reservation_records", "received_at", "TEXT NOT NULL DEFAULT ''");
 
   cachedDb = db;
   seedDatabaseIfEmpty(db);
@@ -203,6 +206,7 @@ function reservationFromRow(row: ReservationRow): ReservationRecord {
     unit: row.unit,
     quantity: row.quantity,
     expectedDate: row.expected_date,
+    receivedAt: row.received_at,
     createdAt: row.created_at,
   };
 }
@@ -261,9 +265,9 @@ function insertUsage(db: DatabaseSync, record: UsageRecord) {
 function insertReservation(db: DatabaseSync, record: ReservationRecord) {
   db.prepare(`
     INSERT INTO reservation_records (
-      id, requester, sap_no, material_name, unit, quantity, expected_date, created_at
+      id, requester, sap_no, material_name, unit, quantity, expected_date, received_at, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     record.id,
     record.requester,
@@ -272,6 +276,7 @@ function insertReservation(db: DatabaseSync, record: ReservationRecord) {
     record.unit,
     record.quantity,
     record.expectedDate,
+    record.receivedAt,
     record.createdAt,
   );
 }
@@ -535,6 +540,7 @@ export function createReservation(input: ReservationInput): InventoryState {
     unit,
     quantity,
     expectedDate,
+    receivedAt: "",
     createdAt: new Date().toISOString(),
   };
   insertReservation(getDatabase(), record);
@@ -552,6 +558,10 @@ export function receiveReservation(reservationId: string): InventoryState {
       | ReservationRow
       | undefined;
     if (!reservation) throw new Error("所选预约记录不存在，请刷新页面后重试。");
+    if (reservation.received_at) {
+      db.exec("COMMIT;");
+      return getInventoryState();
+    }
 
     const template = (
       reservation.sap_no
@@ -584,7 +594,7 @@ export function receiveReservation(reservationId: string): InventoryState {
     };
 
     insertMaterial(db, batch);
-    db.prepare("DELETE FROM reservation_records WHERE id = ?").run(id);
+    db.prepare("UPDATE reservation_records SET received_at = ? WHERE id = ?").run(now, id);
     db.exec("COMMIT;");
   } catch (error) {
     db.exec("ROLLBACK;");

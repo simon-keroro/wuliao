@@ -415,6 +415,13 @@ td strong {
   border-color: var(--danger);
 }
 
+.table-action-muted,
+.table-action-muted:hover {
+  border-color: var(--line);
+  background: var(--neutral-bg);
+  color: #5b625d;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
