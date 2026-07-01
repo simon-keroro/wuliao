@@ -2,16 +2,13 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import type { InventoryState, MaterialBatch, ReservationRecord, UsageRecord } from "@/lib/materials";
+import { APP_DISPLAY_TITLE } from "@/lib/version";
 
 type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList";
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
 
 const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
-const APP_TITLE = "科研开发部物料管理系统";
-const APP_VERSION = "V03";
-const APP_DISPLAY_TITLE = `${APP_TITLE} ${APP_VERSION}`;
-
 function getTodayDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -128,6 +125,7 @@ export default function Home() {
   const [reservationRecords, setReservationRecords] = useState<ReservationRecord[]>([]);
   const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
+  const [materialToDelete, setMaterialToDelete] = useState<MaterialBatch | null>(null);
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [reservationForm, setReservationForm] = useState(() => ({ ...emptyReservation, expectedDate: getTodayDate() }));
   const [password, setPassword] = useState("");
@@ -374,14 +372,18 @@ export default function Home() {
     }
   }
 
-  async function resetDemoData() {
+  async function confirmDeleteMaterial() {
+    if (!materialToDelete) return;
     setIsSubmitting(true);
     try {
-      const state = await requestJson<InventoryState>("/api/reset-demo", { method: "POST" });
+      const state = await requestJson<InventoryState>(`/api/materials?id=${encodeURIComponent(materialToDelete.id)}`, {
+        method: "DELETE",
+      });
       applyState(state);
-      setMessage("已恢复演示数据，并同步到服务器。");
+      setMessage(`${materialToDelete.name} 已删除。`);
+      setMaterialToDelete(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "恢复演示数据失败。");
+      setMessage(error instanceof Error ? error.message : "删除物料失败。");
     } finally {
       setIsSubmitting(false);
     }
@@ -497,7 +499,7 @@ export default function Home() {
             <h2>库存总览</h2>
             <button className="primary" onClick={startNewMaterial}>新增入库</button>
           </div>
-          <InventoryTable materials={filteredMaterials} onEdit={startEditMaterial} />
+          <InventoryTable materials={filteredMaterials} onEdit={startEditMaterial} onDelete={setMaterialToDelete} />
         </section>
       )}
 
@@ -505,12 +507,11 @@ export default function Home() {
         <section className="panel">
           <div className="panel-heading">
             <h2>{isEditingMaterial ? "编辑物料元数据" : "物料入库"}</h2>
-            <div className="panel-actions">
-              {isEditingMaterial ? (
+            {isEditingMaterial ? (
+              <div className="panel-actions">
                 <button className="secondary" type="button" onClick={cancelEditMaterial} disabled={isSubmitting}>取消编辑</button>
-              ) : null}
-              <button className="secondary" onClick={resetDemoData} disabled={isSubmitting}>恢复演示数据</button>
-            </div>
+              </div>
+            ) : null}
           </div>
           <form className="form-grid" onSubmit={handleMaterialSubmit}>
             <TextInput label="SAP号" value={materialForm.sapNo} onChange={(sapNo) => setMaterialForm({ ...materialForm, sapNo })} placeholder="8位数字" pattern="[0-9]{8}" maxLength={8} />
@@ -629,6 +630,23 @@ export default function Home() {
           <RecordsTable records={filteredUsage} />
         </section>
       )}
+
+      {materialToDelete ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-material-title">
+            <h2 id="delete-material-title">请确认是否删除本物料</h2>
+            <p>{materialToDelete.name}</p>
+            <div className="dialog-actions">
+              <button className="secondary" type="button" onClick={() => setMaterialToDelete(null)} disabled={isSubmitting}>
+                否
+              </button>
+              <button className="danger-action" type="button" onClick={confirmDeleteMaterial} disabled={isSubmitting}>
+                是
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   );
 }
@@ -702,7 +720,15 @@ function TextInput({
   );
 }
 
-function InventoryTable({ materials, onEdit }: { materials: MaterialBatch[]; onEdit: (batch: MaterialBatch) => void }) {
+function InventoryTable({
+  materials,
+  onEdit,
+  onDelete,
+}: {
+  materials: MaterialBatch[];
+  onEdit: (batch: MaterialBatch) => void;
+  onDelete: (batch: MaterialBatch) => void;
+}) {
   return (
     <div className="table-wrap">
       <table>
@@ -748,7 +774,12 @@ function InventoryTable({ materials, onEdit }: { materials: MaterialBatch[]; onE
                   <Badge tone={stock.tone}>{stock.label}</Badge>
                 </td>
                 <td>
-                  <button className="table-action" type="button" onClick={() => onEdit(batch)}>编辑</button>
+                  <div className="table-actions">
+                    <button className="table-action" type="button" onClick={() => onEdit(batch)}>编辑</button>
+                    <button className="table-action table-action-danger" type="button" onClick={() => onDelete(batch)}>
+                      删除
+                    </button>
+                  </div>
                 </td>
               </tr>
             );

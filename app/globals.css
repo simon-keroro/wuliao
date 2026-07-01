@@ -401,6 +401,65 @@ td strong {
   white-space: nowrap;
 }
 
+.table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-action-danger {
+  color: var(--danger);
+}
+
+.table-action-danger:hover {
+  border-color: var(--danger);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(23, 33, 27, 0.36);
+  padding: 20px;
+}
+
+.confirm-dialog {
+  width: min(420px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  padding: 22px;
+}
+
+.confirm-dialog p {
+  margin-top: 10px;
+  color: var(--muted);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.danger-action {
+  min-height: 42px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--danger);
+  color: #ffffff;
+  padding: 0 18px;
+  font-weight: 800;
+}
+
+.danger-action:hover {
+  background: #8d3434;
+}
+
 small {
   display: block;
   color: var(--muted);

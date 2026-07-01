@@ -442,6 +442,27 @@ export function updateMaterial(input: MaterialUpdateInput): InventoryState {
   return getInventoryState();
 }
 
+export function deleteMaterial(materialBatchId: string): InventoryState {
+  const db = getDatabase();
+  const id = requiredText(materialBatchId);
+  if (!id) throw new Error("缺少要删除的库存批次。");
+
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const current = db.prepare("SELECT * FROM materials WHERE id = ?").get(id) as MaterialRow | undefined;
+    if (!current) throw new Error("所选库存批次不存在，请刷新页面后重试。");
+
+    db.prepare("DELETE FROM usage_records WHERE material_batch_id = ?").run(id);
+    db.prepare("DELETE FROM materials WHERE id = ?").run(id);
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+
+  return getInventoryState();
+}
+
 export function createUsageRecord(input: UsageInput): InventoryState {
   const db = getDatabase();
   const materialBatchId = requiredText(input.materialBatchId);
