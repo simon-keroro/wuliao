@@ -377,6 +377,22 @@ export default function Home() {
     }
   }
 
+  async function handleDeleteReservation(record: ReservationRecord) {
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>(`/api/reservations?id=${encodeURIComponent(record.id)}`, {
+        method: "DELETE",
+      });
+      applyState(state);
+      setMessage(`${record.materialName} 的预约记录已删除。`);
+      setActiveTab("reservationList");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除预约记录失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function confirmDeleteMaterial() {
     if (!materialToDelete) return;
     setIsSubmitting(true);
@@ -622,7 +638,12 @@ export default function Home() {
             <h2>预约清单</h2>
             <button className="secondary" onClick={() => exportCsv("仓储领料预约清单.csv", filteredReservations.map(formatReservationExport))}>导出Excel</button>
           </div>
-          <ReservationsTable records={filteredReservations} onToggleReceipt={handleToggleReservationReceipt} isSubmitting={isSubmitting} />
+          <ReservationsTable
+            records={filteredReservations}
+            onToggleReceipt={handleToggleReservationReceipt}
+            onDelete={handleDeleteReservation}
+            isSubmitting={isSubmitting}
+          />
         </section>
       )}
 
@@ -835,10 +856,12 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
 function ReservationsTable({
   records,
   onToggleReceipt,
+  onDelete,
   isSubmitting,
 }: {
   records: ReservationRecord[];
   onToggleReceipt: (record: ReservationRecord) => void;
+  onDelete: (record: ReservationRecord) => void;
   isSubmitting: boolean;
 }) {
   return (
@@ -871,14 +894,24 @@ function ReservationsTable({
                 <td>{record.unit}</td>
                 <td>{record.createdAt.slice(0, 10)}</td>
                 <td>
-                  <button
-                    className={`table-action ${isReceived ? "table-action-muted" : ""}`}
-                    type="button"
-                    onClick={() => onToggleReceipt(record)}
-                    disabled={isSubmitting}
-                  >
-                    {isReceived ? "已入研发库" : "需从仓储领取"}
-                  </button>
+                  <div className="table-actions">
+                    <button
+                      className={`table-action ${isReceived ? "table-action-muted" : ""}`}
+                      type="button"
+                      onClick={() => onToggleReceipt(record)}
+                      disabled={isSubmitting}
+                    >
+                      {isReceived ? "已入研发库" : "需从仓储领取"}
+                    </button>
+                    <button
+                      className="table-action table-action-danger"
+                      type="button"
+                      onClick={() => onDelete(record)}
+                      disabled={isSubmitting}
+                    >
+                      删除
+                    </button>
+                  </div>
                   {isReceived ? <small>{record.receivedAt.slice(0, 10)}</small> : null}
                 </td>
               </tr>

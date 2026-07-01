@@ -682,6 +682,17 @@ export function undoReceiveReservation(reservationId: string): InventoryState {
   return getInventoryState();
 }
 
+export function deleteReservation(reservationId: string): InventoryState {
+  const db = getDatabase();
+  const id = requiredText(reservationId);
+  if (!id) throw new Error("缺少要删除的预约记录。");
+
+  const result = db.prepare("DELETE FROM reservation_records WHERE id = ?").run(id);
+  if (result.changes === 0) throw new Error("所选预约记录不存在，请刷新页面后重试。");
+
+  return getInventoryState();
+}
+
 export function restoreDemoState(): InventoryState {
   resetDemoData();
   return getInventoryState();
