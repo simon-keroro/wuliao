@@ -446,6 +446,22 @@ td strong {
   color: var(--muted);
 }
 
+.dialog-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.dialog-error {
+  border: 1px solid var(--danger-bg);
+  border-radius: 8px;
+  background: var(--danger-bg);
+  color: var(--danger);
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;

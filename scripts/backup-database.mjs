@@ -59,6 +59,10 @@ function optionalEnv(name, fallback) {
   return process.env[name]?.trim() || fallback;
 }
 
+export function getRequiredBackupPassword() {
+  return requiredEnv("BACKUP_PASSWORD");
+}
+
 function normalizeSmtpPassword(host, password) {
   if (!host.toLowerCase().includes("gmail.com")) return password;
   return password.replace(/\s+/g, "");

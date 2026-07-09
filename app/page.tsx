@@ -135,6 +135,9 @@ export default function Home() {
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [reservationForm, setReservationForm] = useState(() => ({ ...emptyReservation, expectedDate: getTodayDate() }));
   const [password, setPassword] = useState("");
+  const [backupPassword, setBackupPassword] = useState("");
+  const [backupDialogMessage, setBackupDialogMessage] = useState("");
+  const [isBackupDialogOpen, setIsBackupDialogOpen] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -270,17 +273,37 @@ export default function Home() {
     }
   }
 
-  async function handleBackupDatabase() {
+  function openBackupDialog() {
+    setBackupPassword("");
+    setBackupDialogMessage("");
+    setIsBackupDialogOpen(true);
+  }
+
+  function closeBackupDialog() {
+    if (isBackingUp) return;
+    setBackupPassword("");
+    setBackupDialogMessage("");
+    setIsBackupDialogOpen(false);
+  }
+
+  async function handleBackupDatabase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setIsBackingUp(true);
+    setBackupDialogMessage("");
     try {
-      const result = await requestJson<BackupResponse>("/api/backup-database", { method: "POST" });
+      const result = await requestJson<BackupResponse>("/api/backup-database", {
+        method: "POST",
+        body: JSON.stringify({ password: backupPassword }),
+      });
+      setBackupPassword("");
+      setIsBackupDialogOpen(false);
       setMessage(
         result.sent
           ? `数据库备份已发送至 ${result.to || "kerorosen@gmail.com"}。备份时间：${result.generatedAt}`
           : `数据库备份文件已生成，当前为测试模式，未发送邮件。备份时间：${result.generatedAt}`,
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "数据库备份发送失败。");
+      setBackupDialogMessage(error instanceof Error ? error.message : "数据库备份发送失败。");
     } finally {
       setIsBackingUp(false);
     }
@@ -472,7 +495,7 @@ export default function Home() {
           <button className="secondary" onClick={() => exportCsv("库存总览.csv", materials.map(formatMaterialExport))}>
             导出库存
           </button>
-          <button className="secondary" onClick={handleBackupDatabase} disabled={isBackingUp || isSubmitting}>
+          <button className="secondary" onClick={openBackupDialog} disabled={isBackingUp || isSubmitting}>
             {isBackingUp ? "正在备份" : "备份数据库"}
           </button>
           <button className="secondary" onClick={() => exportCsv("领用记录.csv", usageRecords.map(formatUsageExport))}>
@@ -696,6 +719,36 @@ export default function Home() {
                 是
               </button>
             </div>
+          </section>
+        </div>
+      ) : null}
+
+      {isBackupDialogOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="backup-password-title">
+            <h2 id="backup-password-title">备份密码</h2>
+            <form className="dialog-form" onSubmit={handleBackupDatabase}>
+              <label>
+                请输入备份密码
+                <input
+                  type="password"
+                  value={backupPassword}
+                  onChange={(event) => setBackupPassword(event.target.value)}
+                  autoFocus
+                  required
+                  disabled={isBackingUp}
+                />
+              </label>
+              {backupDialogMessage ? <p className="dialog-error">{backupDialogMessage}</p> : null}
+              <div className="dialog-actions">
+                <button className="secondary" type="button" onClick={closeBackupDialog} disabled={isBackingUp}>
+                  取消
+                </button>
+                <button className="primary" type="submit" disabled={isBackingUp}>
+                  {isBackingUp ? "正在备份" : "确认备份"}
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       ) : null}

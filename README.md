@@ -47,6 +47,7 @@ BACKUP_SMTP_PORT="465"
 BACKUP_SMTP_USER="your-sender@gmail.com"
 BACKUP_SMTP_PASS="your-gmail-app-password"
 BACKUP_EMAIL_TO="kerorosen@gmail.com"
+BACKUP_PASSWORD="change-this-backup-password"
 ```
 
 Use a Gmail app password for `BACKUP_SMTP_PASS`; do not use the normal Gmail
@@ -72,7 +73,9 @@ TZ=Asia/Shanghai
 ```
 
 The in-app `备份数据库` button uses the same SMTP configuration and sends the
-same backup attachments to `kerorosen@gmail.com`.
+same backup attachments to `kerorosen@gmail.com`. It also requires
+`BACKUP_PASSWORD` before the email is sent. The weekly cron backup does not
+need this password because it runs directly on the VPS.
 
 The backup script also reads `.env` from the project directory when variables
 are not already provided by the running process. After changing `.env`, restart
