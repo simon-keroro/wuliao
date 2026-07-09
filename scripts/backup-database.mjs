@@ -10,15 +10,58 @@ const SHANGHAI_TIME_ZONE = "Asia/Shanghai";
 const DEFAULT_DATABASE_PATH = path.join(process.cwd(), "data", "materials.sqlite");
 const DEFAULT_BACKUP_DIR = path.join(process.cwd(), "backups");
 const DEFAULT_EMAIL_TO = "kerorosen@gmail.com";
+let envLoaded = false;
+
+function parseEnvValue(value) {
+  const trimmed = value.trim();
+  if (
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function loadLocalEnvFile() {
+  if (envLoaded) return;
+  envLoaded = true;
+
+  const envPath = path.join(process.cwd(), ".env");
+  if (!existsSync(envPath)) return;
+
+  const source = readFileSync(envPath, "utf8");
+  for (const line of source.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const normalized = trimmed.startsWith("export ") ? trimmed.slice(7).trim() : trimmed;
+    const separatorIndex = normalized.indexOf("=");
+    if (separatorIndex <= 0) continue;
+
+    const key = normalized.slice(0, separatorIndex).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    if (process.env[key]) continue;
+
+    process.env[key] = parseEnvValue(normalized.slice(separatorIndex + 1));
+  }
+}
 
 function requiredEnv(name) {
+  loadLocalEnvFile();
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`缺少环境变量 ${name}。`);
   return value;
 }
 
 function optionalEnv(name, fallback) {
+  loadLocalEnvFile();
   return process.env[name]?.trim() || fallback;
+}
+
+function normalizeSmtpPassword(host, password) {
+  if (!host.toLowerCase().includes("gmail.com")) return password;
+  return password.replace(/\s+/g, "");
 }
 
 function getAppInfo() {
@@ -173,11 +216,16 @@ function readSmtpResponse(socket) {
   });
 }
 
-async function sendCommand(socket, command, expectedCodes) {
+async function sendCommand(socket, command, expectedCodes, label = command) {
   socket.write(`${command}\r\n`);
   const response = await readSmtpResponse(socket);
   if (!expectedCodes.includes(response.code)) {
-    throw new Error(`SMTP 命令失败：${command}\n${response.message}`);
+    if (label === "SMTP password") {
+      throw new Error(
+        "Gmail SMTP 登录失败：用户名或应用专用密码不被接受。请确认 VPS 的 .env 已被 Web 服务加载，并确认 BACKUP_SMTP_PASS 是 Gmail 应用专用密码。",
+      );
+    }
+    throw new Error(`SMTP 命令失败：${label}\n${response.message}`);
   }
   return response;
 }
@@ -204,10 +252,10 @@ async function sendMail({ host, port, user, pass, from, to, subject, text, attac
 
     await sendCommand(socket, "EHLO localhost", [250]);
     await sendCommand(socket, "AUTH LOGIN", [334]);
-    await sendCommand(socket, Buffer.from(user, "utf8").toString("base64"), [334]);
-    await sendCommand(socket, Buffer.from(pass, "utf8").toString("base64"), [235]);
-    await sendCommand(socket, `MAIL FROM:<${from}>`, [250]);
-    await sendCommand(socket, `RCPT TO:<${to}>`, [250, 251]);
+    await sendCommand(socket, Buffer.from(user, "utf8").toString("base64"), [334], "SMTP username");
+    await sendCommand(socket, Buffer.from(pass, "utf8").toString("base64"), [235], "SMTP password");
+    await sendCommand(socket, `MAIL FROM:<${from}>`, [250], "MAIL FROM");
+    await sendCommand(socket, `RCPT TO:<${to}>`, [250, 251], "RCPT TO");
     await sendCommand(socket, "DATA", [354]);
 
     const message = buildMimeMessage({ from, to, subject, text, attachments });
@@ -263,7 +311,7 @@ export async function runDatabaseBackup(options = {}) {
   if (!Number.isInteger(port) || port <= 0) throw new Error("BACKUP_SMTP_PORT 必须是有效端口。");
 
   const user = requiredEnv("BACKUP_SMTP_USER");
-  const pass = requiredEnv("BACKUP_SMTP_PASS");
+  const pass = normalizeSmtpPassword(host, requiredEnv("BACKUP_SMTP_PASS"));
   const from = optionalEnv("BACKUP_EMAIL_FROM", user);
   const to = optionalEnv("BACKUP_EMAIL_TO", DEFAULT_EMAIL_TO);
   const subject = `${appInfo.title} ${appInfo.version} 数据库备份 ${stamp}`;

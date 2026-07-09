@@ -74,6 +74,10 @@ TZ=Asia/Shanghai
 The in-app `备份数据库` button uses the same SMTP configuration and sends the
 same backup attachments to `kerorosen@gmail.com`.
 
+The backup script also reads `.env` from the project directory when variables
+are not already provided by the running process. After changing `.env`, restart
+the web app service so the in-app backup button uses the latest settings.
+
 This starter does not use `wrangler.jsonc`.
 
 ## Included Shape
