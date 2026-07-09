@@ -1,4 +1,5 @@
-import { jsonError, requireAuth } from "@/lib/server/http";
+import { jsonError, requirePermission } from "@/lib/server/http";
+import { logAudit } from "@/lib/server/store";
 
 export const dynamic = "force-dynamic";
 
@@ -7,8 +8,8 @@ function isSamePassword(input: string, expected: string) {
 }
 
 export async function POST(request: Request) {
-  const unauthorized = requireAuth(request);
-  if (unauthorized) return unauthorized;
+  const user = requirePermission(request, "backup:run");
+  if (user instanceof Response) return user;
 
   try {
     const payload = (await request.json().catch(() => ({}))) as { password?: string };
@@ -19,6 +20,7 @@ export async function POST(request: Request) {
     }
 
     const result = await runDatabaseBackup();
+    logAudit(user, "backup.run", result.to || "local-dry-run", { sent: result.sent });
     return Response.json({
       ok: true,
       sent: result.sent,

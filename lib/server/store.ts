@@ -5,15 +5,21 @@ import { DatabaseSync } from "node:sqlite";
 import {
   initialMaterials,
   initialUsage,
+  type CurrentUser,
   type InventoryState,
   type MaterialBatch,
   type MaterialInput,
   type MaterialUpdateInput,
+  type PublicUser,
   type ReservationInput,
   type ReservationRecord,
+  type UserInput,
+  type UserUpdateInput,
   type UsageInput,
   type UsageRecord,
 } from "@/lib/materials";
+import { getPermissions, isUserRole, type UserRole } from "@/lib/permissions";
+import { hashPassword, verifyPassword } from "@/lib/server/password";
 
 type MaterialRow = {
   id: string;
@@ -60,6 +66,18 @@ type ReservationRow = {
   received_at: string;
   received_batch_id: string;
   created_at: string;
+};
+
+type UserRow = {
+  id: string;
+  username: string;
+  display_name: string;
+  password_hash: string;
+  role: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+  last_login_at: string;
 };
 
 let cachedDb: DatabaseSync | null = null;
@@ -133,11 +151,39 @@ function getDatabase() {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_login_at TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      action TEXT NOT NULL,
+      target TEXT NOT NULL,
+      details TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS usage_records_created_at_idx
       ON usage_records(created_at DESC);
 
     CREATE INDEX IF NOT EXISTS reservation_records_expected_date_idx
       ON reservation_records(expected_date ASC, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS users_username_idx
+      ON users(username);
+
+    CREATE INDEX IF NOT EXISTS audit_logs_created_at_idx
+      ON audit_logs(created_at DESC);
   `);
   ensureColumn(db, "materials", "sap_no", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "sap_no", "TEXT NOT NULL DEFAULT ''");
@@ -145,6 +191,7 @@ function getDatabase() {
   ensureColumn(db, "reservation_records", "received_batch_id", "TEXT NOT NULL DEFAULT ''");
 
   cachedDb = db;
+  seedAdminUserIfEmpty(db);
   seedDatabaseIfEmpty(db);
   return db;
 }
@@ -155,11 +202,63 @@ function ensureColumn(db: DatabaseSync, table: string, column: string, definitio
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
 }
 
+function requiredBootstrapPassword() {
+  const password = process.env.BOOTSTRAP_ADMIN_PASSWORD || process.env.APP_PASSWORD || "";
+  if (!password) {
+    throw new Error("服务器尚未设置 BOOTSTRAP_ADMIN_PASSWORD 或 APP_PASSWORD，不能创建初始管理员。");
+  }
+  return password;
+}
+
+function seedAdminUserIfEmpty(db: DatabaseSync) {
+  const userCount = db.prepare("SELECT COUNT(*) AS count FROM users").get() as { count: number };
+  if (userCount.count > 0) return;
+
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO users (
+      id, username, display_name, password_hash, role, enabled, created_at, updated_at, last_login_at
+    )
+    VALUES (?, ?, ?, ?, 'admin', 1, ?, ?, '')
+  `).run(
+    `user-${randomUUID()}`,
+    requiredText(process.env.BOOTSTRAP_ADMIN_USERNAME) || "admin",
+    requiredText(process.env.BOOTSTRAP_ADMIN_NAME) || "系统管理员",
+    hashPassword(requiredBootstrapPassword()),
+    now,
+    now,
+  );
+}
+
 function seedDatabaseIfEmpty(db: DatabaseSync) {
   const materialCount = db.prepare("SELECT COUNT(*) AS count FROM materials").get() as { count: number };
   const usageCount = db.prepare("SELECT COUNT(*) AS count FROM usage_records").get() as { count: number };
   if (materialCount.count > 0 || usageCount.count > 0) return;
   resetDemoData(db);
+}
+
+function userFromRow(row: UserRow): PublicUser {
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    role: isUserRole(row.role) ? row.role : "readonly",
+    enabled: Boolean(row.enabled),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastLoginAt: row.last_login_at,
+  };
+}
+
+function currentUserFromRow(row: UserRow): CurrentUser {
+  const user = userFromRow(row);
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName,
+    role: user.role,
+    permissions: getPermissions(user.role),
+  };
 }
 
 function materialFromRow(row: MaterialRow): MaterialBatch {
@@ -398,6 +497,137 @@ function findReceivedBatchId(db: DatabaseSync, reservation: ReservationRow) {
     ) as { id: string } | undefined;
 
   return row?.id ?? "";
+}
+
+function ensureRole(role: string | undefined): UserRole {
+  if (role && isUserRole(role)) return role;
+  throw new Error("请选择有效的用户角色。");
+}
+
+function ensureCanChangeAdmin(db: DatabaseSync, id: string, nextRole?: UserRole, nextEnabled?: boolean) {
+  const current = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
+  if (!current) throw new Error("用户不存在。");
+  if (current.role !== "admin") return;
+
+  const activeAdminCount = db
+    .prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND enabled = 1")
+    .get() as { count: number };
+  const willRemainActiveAdmin = (nextRole ?? current.role) === "admin" && (nextEnabled ?? Boolean(current.enabled));
+  if (activeAdminCount.count <= 1 && !willRemainActiveAdmin) {
+    throw new Error("不能停用或降级最后一个系统管理员。");
+  }
+}
+
+export function authenticateUser(username: string, password: string): CurrentUser | null {
+  const db = getDatabase();
+  const normalizedUsername = requiredText(username);
+  if (!normalizedUsername || !password) return null;
+
+  const row = db.prepare("SELECT * FROM users WHERE username = ?").get(normalizedUsername) as UserRow | undefined;
+  if (!row || !row.enabled || !verifyPassword(password, row.password_hash)) return null;
+
+  const now = new Date().toISOString();
+  db.prepare("UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?").run(now, now, row.id);
+  const updated = db.prepare("SELECT * FROM users WHERE id = ?").get(row.id) as UserRow;
+  return currentUserFromRow(updated);
+}
+
+export function getCurrentUserById(userId: string): CurrentUser | null {
+  const db = getDatabase();
+  const row = db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined;
+  if (!row || !row.enabled) return null;
+  return currentUserFromRow(row);
+}
+
+export function listUsers(): PublicUser[] {
+  const db = getDatabase();
+  return (db.prepare("SELECT * FROM users ORDER BY role ASC, username ASC").all() as UserRow[]).map(userFromRow);
+}
+
+export function createUser(input: UserInput, actor: CurrentUser): PublicUser[] {
+  const username = requiredText(input.username);
+  const displayName = requiredText(input.displayName) || username;
+  const password = input.password ?? "";
+  const role = ensureRole(input.role);
+  if (!username || !/^[A-Za-z0-9._-]{2,40}$/.test(username)) {
+    throw new Error("用户名需为 2-40 位字母、数字、点、下划线或短横线。");
+  }
+  if (password.length < 6) throw new Error("用户密码至少需要 6 位。");
+
+  const db = getDatabase();
+  const now = new Date().toISOString();
+  try {
+    db.prepare(`
+      INSERT INTO users (
+        id, username, display_name, password_hash, role, enabled, created_at, updated_at, last_login_at
+      )
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?, '')
+    `).run(`user-${randomUUID()}`, username, displayName, hashPassword(password), role, now, now);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("UNIQUE")) {
+      throw new Error("用户名已存在。");
+    }
+    throw error;
+  }
+  logAudit(actor, "user.create", username, { role });
+  return listUsers();
+}
+
+export function updateUser(input: UserUpdateInput, actor: CurrentUser): PublicUser[] {
+  const db = getDatabase();
+  const id = requiredText(input.id);
+  if (!id) throw new Error("缺少要修改的用户。");
+
+  const role = input.role ? ensureRole(input.role) : undefined;
+  const enabled = typeof input.enabled === "boolean" ? input.enabled : undefined;
+  ensureCanChangeAdmin(db, id, role, enabled);
+
+  const current = db.prepare("SELECT * FROM users WHERE id = ?").get(id) as UserRow | undefined;
+  if (!current) throw new Error("用户不存在。");
+
+  const nextDisplayName = requiredText(input.displayName) || current.display_name;
+  const nextRole = role ?? (isUserRole(current.role) ? current.role : "readonly");
+  const nextEnabled = enabled ?? Boolean(current.enabled);
+  const now = new Date().toISOString();
+
+  db.prepare("UPDATE users SET display_name = ?, role = ?, enabled = ?, updated_at = ? WHERE id = ?").run(
+    nextDisplayName,
+    nextRole,
+    nextEnabled ? 1 : 0,
+    now,
+    id,
+  );
+  logAudit(actor, "user.update", current.username, { role: nextRole, enabled: nextEnabled });
+  return listUsers();
+}
+
+export function resetUserPassword(id: string, password: string, actor: CurrentUser): PublicUser[] {
+  if (password.length < 6) throw new Error("新密码至少需要 6 位。");
+  const db = getDatabase();
+  const userId = requiredText(id);
+  const current = db.prepare("SELECT * FROM users WHERE id = ?").get(userId) as UserRow | undefined;
+  if (!current) throw new Error("用户不存在。");
+
+  const now = new Date().toISOString();
+  db.prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?").run(hashPassword(password), now, userId);
+  logAudit(actor, "user.password.reset", current.username, {});
+  return listUsers();
+}
+
+export function logAudit(user: CurrentUser, action: string, target: string, details: Record<string, unknown>) {
+  const db = getDatabase();
+  db.prepare(`
+    INSERT INTO audit_logs (id, user_id, username, action, target, details, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    `audit-${randomUUID()}`,
+    user.id,
+    user.username,
+    action,
+    target,
+    JSON.stringify(details),
+    new Date().toISOString(),
+  );
 }
 
 export function getInventoryState(): InventoryState {

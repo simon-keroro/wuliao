@@ -1,10 +1,11 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import type { InventoryState, MaterialBatch, ReservationRecord, UsageRecord } from "@/lib/materials";
+import type { CurrentUser, InventoryState, MaterialBatch, PublicUser, ReservationRecord, UsageRecord } from "@/lib/materials";
+import { ROLE_LABELS, type Permission, type UserRole } from "@/lib/permissions";
 import { APP_DISPLAY_TITLE } from "@/lib/version";
 
-type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList";
+type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList" | "users";
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
 type BackupResponse = {
@@ -12,6 +13,12 @@ type BackupResponse = {
   sent: boolean;
   to: string;
   generatedAt: string;
+};
+type MeResponse = {
+  user: CurrentUser;
+};
+type UsersResponse = {
+  users: PublicUser[];
 };
 
 const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
@@ -51,6 +58,13 @@ const emptyReservation = {
   unit: "",
   quantity: "",
   expectedDate: getTodayDate(),
+};
+
+const emptyUserForm = {
+  username: "",
+  displayName: "",
+  password: "",
+  role: "user" as UserRole,
 };
 
 function daysUntil(dateValue: string) {
@@ -129,12 +143,18 @@ export default function Home() {
   const [materials, setMaterials] = useState<MaterialBatch[]>([]);
   const [usageRecords, setUsageRecords] = useState<UsageRecord[]>([]);
   const [reservationRecords, setReservationRecords] = useState<ReservationRecord[]>([]);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [users, setUsers] = useState<PublicUser[]>([]);
   const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
+  const [userForm, setUserForm] = useState(() => ({ ...emptyUserForm }));
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [materialToDelete, setMaterialToDelete] = useState<MaterialBatch | null>(null);
+  const [passwordResetUser, setPasswordResetUser] = useState<PublicUser | null>(null);
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [reservationForm, setReservationForm] = useState(() => ({ ...emptyReservation, expectedDate: getTodayDate() }));
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
   const [backupPassword, setBackupPassword] = useState("");
   const [backupDialogMessage, setBackupDialogMessage] = useState("");
   const [isBackupDialogOpen, setIsBackupDialogOpen] = useState(false);
@@ -156,13 +176,15 @@ export default function Home() {
   const loadState = useCallback(async () => {
     setIsLoading(true);
     try {
-      const state = await requestJson<InventoryState>("/api/state");
+      const [state, me] = await Promise.all([requestJson<InventoryState>("/api/state"), requestJson<MeResponse>("/api/me")]);
       applyState(state);
+      setCurrentUser(me.user);
       setIsAuthenticated(true);
       setMessage("");
     } catch (error) {
       if (error instanceof ApiError && error.status === 401) {
         setIsAuthenticated(false);
+        setCurrentUser(null);
         setMessage("");
       } else {
         setMessage(error instanceof Error ? error.message : "读取库存数据失败。");
@@ -188,6 +210,28 @@ export default function Home() {
 
   const selectedBatch = materials.find((batch) => batch.id === usageForm.materialBatchId);
   const isEditingMaterial = Boolean(editingMaterialId);
+  const hasPermission = useCallback(
+    (permission: Permission) => Boolean(currentUser?.permissions.includes(permission)),
+    [currentUser],
+  );
+  const canWriteInventory = hasPermission("inventory:write");
+  const canDeleteInventory = hasPermission("inventory:delete");
+  const canCreateUsage = hasPermission("usage:create");
+  const canCreateReservation = hasPermission("reservation:create");
+  const canProcessReservation = hasPermission("reservation:process");
+  const canDeleteReservation = hasPermission("reservation:delete");
+  const canRunBackup = hasPermission("backup:run");
+  const canManageUsers = hasPermission("users:manage");
+  const activeView: Tab =
+    activeTab === "inventory" ||
+    activeTab === "records" ||
+    activeTab === "reservationList" ||
+    (activeTab === "intake" && canWriteInventory) ||
+    (activeTab === "usage" && canCreateUsage) ||
+    (activeTab === "warehouseRequest" && canCreateReservation) ||
+    (activeTab === "users" && canManageUsers)
+      ? activeTab
+      : "inventory";
 
   const stats = useMemo(() => {
     return {
@@ -239,14 +283,21 @@ export default function Home() {
     );
   }, [reservationRecords, query]);
 
+  const loadUsers = useCallback(async () => {
+    if (!canManageUsers) return;
+    const payload = await requestJson<UsersResponse>("/api/users");
+    setUsers(payload.users);
+  }, [canManageUsers]);
+
   async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
     try {
       await requestJson<{ ok: boolean }>("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({ username, password }),
       });
+      setUsername("");
       setPassword("");
       setIsAuthenticated(true);
       await loadState();
@@ -264,6 +315,8 @@ export default function Home() {
       setMaterials([]);
       setUsageRecords([]);
       setReservationRecords([]);
+      setCurrentUser(null);
+      setUsers([]);
       setIsAuthenticated(false);
       setMessage("已退出登录。");
     } catch (error) {
@@ -401,6 +454,65 @@ export default function Home() {
     }
   }
 
+  async function handleUserSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setIsSubmitting(true);
+    try {
+      const payload = await requestJson<UsersResponse>("/api/users", {
+        method: "POST",
+        body: JSON.stringify(userForm),
+      });
+      setUsers(payload.users);
+      setUserForm({ ...emptyUserForm });
+      setMessage("用户已新增。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "新增用户失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleUpdateUser(user: PublicUser, changes: Partial<Pick<PublicUser, "displayName" | "role" | "enabled">>) {
+    setIsSubmitting(true);
+    try {
+      const payload = await requestJson<UsersResponse>("/api/users", {
+        method: "PUT",
+        body: JSON.stringify({
+          id: user.id,
+          displayName: changes.displayName ?? user.displayName,
+          role: changes.role ?? user.role,
+          enabled: changes.enabled ?? user.enabled,
+        }),
+      });
+      setUsers(payload.users);
+      setMessage(`${user.username} 已更新。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "更新用户失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleResetPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!passwordResetUser) return;
+    setIsSubmitting(true);
+    try {
+      const payload = await requestJson<UsersResponse>("/api/users/password", {
+        method: "POST",
+        body: JSON.stringify({ id: passwordResetUser.id, password: newUserPassword }),
+      });
+      setUsers(payload.users);
+      setPasswordResetUser(null);
+      setNewUserPassword("");
+      setMessage(`${passwordResetUser.username} 的密码已重置。`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "重置密码失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function handleToggleReservationReceipt(record: ReservationRecord) {
     const isReceived = Boolean(record.receivedAt);
     setIsSubmitting(true);
@@ -464,12 +576,22 @@ export default function Home() {
           <h1>{APP_DISPLAY_TITLE}</h1>
           <form className="auth-form" onSubmit={handleLoginSubmit}>
             <label>
-              试用密码
+              用户名
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                placeholder="初始管理员通常为 admin"
+                required
+                disabled={isSubmitting || isLoading}
+              />
+            </label>
+            <label>
+              密码
               <input
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="请输入共享密码"
+                placeholder="请输入账号密码"
                 required
                 disabled={isSubmitting || isLoading}
               />
@@ -490,14 +612,21 @@ export default function Home() {
         <div>
           <p className="eyebrow">科研物料管理</p>
           <h1>{APP_DISPLAY_TITLE}</h1>
+          {currentUser ? (
+            <p className="user-status">
+              {currentUser.displayName} / {ROLE_LABELS[currentUser.role]}
+            </p>
+          ) : null}
         </div>
         <div className="top-actions">
           <button className="secondary" onClick={() => exportCsv("库存总览.csv", materials.map(formatMaterialExport))}>
             导出库存
           </button>
-          <button className="secondary" onClick={openBackupDialog} disabled={isBackingUp || isSubmitting}>
-            {isBackingUp ? "正在备份" : "备份数据库"}
-          </button>
+          {canRunBackup ? (
+            <button className="secondary" onClick={openBackupDialog} disabled={isBackingUp || isSubmitting}>
+              {isBackingUp ? "正在备份" : "备份数据库"}
+            </button>
+          ) : null}
           <button className="secondary" onClick={() => exportCsv("领用记录.csv", usageRecords.map(formatUsageExport))}>
             导出流水
           </button>
@@ -518,17 +647,36 @@ export default function Home() {
       </section>
 
       <nav className="tabs" aria-label="主要功能">
-        <TabButton active={activeTab === "inventory"} onClick={() => setActiveTab("inventory")}>库存总览</TabButton>
-        <TabButton active={activeTab === "intake"} onClick={() => setActiveTab("intake")}>物料入库</TabButton>
-        <TabButton active={activeTab === "usage"} onClick={() => setActiveTab("usage")}>领用登记</TabButton>
-        <TabButton active={activeTab === "records"} onClick={() => setActiveTab("records")}>流水记录</TabButton>
-        <TabButton active={activeTab === "warehouseRequest"} tone="request" onClick={() => setActiveTab("warehouseRequest")}>从仓储领料预约</TabButton>
-        <TabButton active={activeTab === "reservationList"} tone="schedule" onClick={() => setActiveTab("reservationList")}>预约清单</TabButton>
+        <TabButton active={activeView === "inventory"} onClick={() => setActiveTab("inventory")}>库存总览</TabButton>
+        {canWriteInventory ? (
+          <TabButton active={activeView === "intake"} onClick={() => setActiveTab("intake")}>物料入库</TabButton>
+        ) : null}
+        {canCreateUsage ? (
+          <TabButton active={activeView === "usage"} onClick={() => setActiveTab("usage")}>领用登记</TabButton>
+        ) : null}
+        <TabButton active={activeView === "records"} onClick={() => setActiveTab("records")}>流水记录</TabButton>
+        {canCreateReservation ? (
+          <TabButton active={activeView === "warehouseRequest"} tone="request" onClick={() => setActiveTab("warehouseRequest")}>从仓储领料预约</TabButton>
+        ) : null}
+        <TabButton active={activeView === "reservationList"} tone="schedule" onClick={() => setActiveTab("reservationList")}>预约清单</TabButton>
+        {canManageUsers ? (
+          <TabButton
+            active={activeView === "users"}
+            onClick={() => {
+              setActiveTab("users");
+              void loadUsers().catch((error) => {
+                setMessage(error instanceof Error ? error.message : "读取用户列表失败。");
+              });
+            }}
+          >
+            用户管理
+          </TabButton>
+        ) : null}
       </nav>
 
       {message ? <div className="notice">{message}</div> : null}
 
-      {(activeTab === "inventory" || activeTab === "records" || activeTab === "reservationList") && (
+      {(activeView === "inventory" || activeView === "records" || activeView === "reservationList") && (
         <section className="toolbar">
           <label className="search">
             <span>搜索</span>
@@ -538,7 +686,7 @@ export default function Home() {
               placeholder="SAP号、物料、批号、供应商、领用人、预约人"
             />
           </label>
-          {activeTab === "inventory" ? (
+          {activeView === "inventory" ? (
             <>
               <label>
                 效期
@@ -563,17 +711,23 @@ export default function Home() {
         </section>
       )}
 
-      {activeTab === "inventory" && (
+      {activeView === "inventory" && (
         <section className="panel">
           <div className="panel-heading">
             <h2>库存总览</h2>
-            <button className="primary" onClick={startNewMaterial}>新增入库</button>
+            {canWriteInventory ? <button className="primary" onClick={startNewMaterial}>新增入库</button> : null}
           </div>
-          <InventoryTable materials={filteredMaterials} onEdit={startEditMaterial} onDelete={setMaterialToDelete} />
+          <InventoryTable
+            materials={filteredMaterials}
+            onEdit={startEditMaterial}
+            onDelete={setMaterialToDelete}
+            canEdit={canWriteInventory}
+            canDelete={canDeleteInventory}
+          />
         </section>
       )}
 
-      {activeTab === "intake" && (
+      {activeView === "intake" && canWriteInventory && (
         <section className="panel">
           <div className="panel-heading">
             <h2>{isEditingMaterial ? "编辑物料元数据" : "物料入库"}</h2>
@@ -607,7 +761,7 @@ export default function Home() {
         </section>
       )}
 
-      {activeTab === "usage" && (
+      {activeView === "usage" && canCreateUsage && (
         <section className="panel">
           <div className="panel-heading">
             <h2>领用登记</h2>
@@ -653,7 +807,7 @@ export default function Home() {
         </section>
       )}
 
-      {activeTab === "warehouseRequest" && (
+      {activeView === "warehouseRequest" && canCreateReservation && (
         <section className="panel">
           <div className="panel-heading">
             <h2>从仓储领料预约</h2>
@@ -681,7 +835,7 @@ export default function Home() {
         </section>
       )}
 
-      {activeTab === "reservationList" && (
+      {activeView === "reservationList" && (
         <section className="panel">
           <div className="panel-heading">
             <h2>预约清单</h2>
@@ -691,12 +845,14 @@ export default function Home() {
             records={filteredReservations}
             onToggleReceipt={handleToggleReservationReceipt}
             onDelete={handleDeleteReservation}
+            canProcess={canProcessReservation}
+            canDelete={canDeleteReservation}
             isSubmitting={isSubmitting}
           />
         </section>
       )}
 
-      {activeTab === "records" && (
+      {activeView === "records" && (
         <section className="panel">
           <div className="panel-heading">
             <h2>领用流水</h2>
@@ -705,6 +861,41 @@ export default function Home() {
           <RecordsTable records={filteredUsage} />
         </section>
       )}
+
+      {activeView === "users" && canManageUsers ? (
+        <section className="panel">
+          <div className="panel-heading">
+            <h2>用户管理</h2>
+            <button className="secondary" onClick={loadUsers} disabled={isSubmitting}>刷新用户</button>
+          </div>
+          <form className="form-grid user-form" onSubmit={handleUserSubmit}>
+            <TextInput label="用户名" value={userForm.username} onChange={(username) => setUserForm({ ...userForm, username })} required />
+            <TextInput label="显示名" value={userForm.displayName} onChange={(displayName) => setUserForm({ ...userForm, displayName })} />
+            <TextInput label="初始密码" type="password" value={userForm.password} onChange={(password) => setUserForm({ ...userForm, password })} required />
+            <label>
+              角色
+              <select value={userForm.role} onChange={(event) => setUserForm({ ...userForm, role: event.target.value as UserRole })}>
+                {Object.entries(ROLE_LABELS).map(([role, label]) => (
+                  <option key={role} value={role}>{label}</option>
+                ))}
+              </select>
+            </label>
+            <div className="form-actions">
+              <button className="primary" type="submit" disabled={isSubmitting}>新增用户</button>
+            </div>
+          </form>
+          <UsersTable
+            users={users}
+            currentUserId={currentUser?.id ?? ""}
+            onUpdate={handleUpdateUser}
+            onResetPassword={(user) => {
+              setPasswordResetUser(user);
+              setNewUserPassword("");
+            }}
+            isSubmitting={isSubmitting}
+          />
+        </section>
+      ) : null}
 
       {materialToDelete ? (
         <div className="modal-backdrop" role="presentation">
@@ -746,6 +937,37 @@ export default function Home() {
                 </button>
                 <button className="primary" type="submit" disabled={isBackingUp}>
                   {isBackingUp ? "正在备份" : "确认备份"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {passwordResetUser ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-password-title">
+            <h2 id="reset-password-title">重置密码</h2>
+            <form className="dialog-form" onSubmit={handleResetPassword}>
+              <p>{passwordResetUser.username}</p>
+              <label>
+                新密码
+                <input
+                  type="password"
+                  value={newUserPassword}
+                  onChange={(event) => setNewUserPassword(event.target.value)}
+                  autoFocus
+                  required
+                  minLength={6}
+                  disabled={isSubmitting}
+                />
+              </label>
+              <div className="dialog-actions">
+                <button className="secondary" type="button" onClick={() => setPasswordResetUser(null)} disabled={isSubmitting}>
+                  取消
+                </button>
+                <button className="primary" type="submit" disabled={isSubmitting}>
+                  确认重置
                 </button>
               </div>
             </form>
@@ -829,10 +1051,14 @@ function InventoryTable({
   materials,
   onEdit,
   onDelete,
+  canEdit,
+  canDelete,
 }: {
   materials: MaterialBatch[];
   onEdit: (batch: MaterialBatch) => void;
   onDelete: (batch: MaterialBatch) => void;
+  canEdit: boolean;
+  canDelete: boolean;
 }) {
   return (
     <div className="table-wrap">
@@ -848,7 +1074,7 @@ function InventoryTable({
             <th>入库 / 有效期</th>
             <th>库存</th>
             <th>状态</th>
-            <th>操作</th>
+            {canEdit || canDelete ? <th>操作</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -878,14 +1104,20 @@ function InventoryTable({
                   <Badge tone={expiry.tone}>{expiry.label}</Badge>
                   <Badge tone={stock.tone}>{stock.label}</Badge>
                 </td>
-                <td>
-                  <div className="table-actions">
-                    <button className="table-action" type="button" onClick={() => onEdit(batch)}>编辑</button>
-                    <button className="table-action table-action-danger" type="button" onClick={() => onDelete(batch)}>
-                      删除
-                    </button>
-                  </div>
-                </td>
+                {canEdit || canDelete ? (
+                  <td>
+                    <div className="table-actions">
+                      {canEdit ? (
+                        <button className="table-action" type="button" onClick={() => onEdit(batch)}>编辑</button>
+                      ) : null}
+                      {canDelete ? (
+                        <button className="table-action table-action-danger" type="button" onClick={() => onDelete(batch)}>
+                          删除
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                ) : null}
               </tr>
             );
           })}
@@ -932,15 +1164,99 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
   );
 }
 
+function UsersTable({
+  users,
+  currentUserId,
+  onUpdate,
+  onResetPassword,
+  isSubmitting,
+}: {
+  users: PublicUser[];
+  currentUserId: string;
+  onUpdate: (user: PublicUser, changes: Partial<Pick<PublicUser, "displayName" | "role" | "enabled">>) => void;
+  onResetPassword: (user: PublicUser) => void;
+  isSubmitting: boolean;
+}) {
+  return (
+    <div className="table-wrap users-table">
+      <table>
+        <thead>
+          <tr>
+            <th>用户名</th>
+            <th>显示名</th>
+            <th>角色</th>
+            <th>状态</th>
+            <th>最后登录</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map((user) => {
+            const isSelf = user.id === currentUserId;
+            return (
+              <tr key={user.id}>
+                <td><strong>{user.username}</strong></td>
+                <td>
+                  <input
+                    defaultValue={user.displayName}
+                    onBlur={(event) => {
+                      if (event.target.value !== user.displayName) onUpdate(user, { displayName: event.target.value });
+                    }}
+                    disabled={isSubmitting}
+                  />
+                </td>
+                <td>
+                  <select
+                    value={user.role}
+                    onChange={(event) => onUpdate(user, { role: event.target.value as UserRole })}
+                    disabled={isSubmitting}
+                  >
+                    {Object.entries(ROLE_LABELS).map(([role, label]) => (
+                      <option key={role} value={role}>{label}</option>
+                    ))}
+                  </select>
+                </td>
+                <td>{user.enabled ? <Badge tone="success">启用</Badge> : <Badge tone="neutral">停用</Badge>}</td>
+                <td>{user.lastLoginAt ? user.lastLoginAt.slice(0, 10) : "-"}</td>
+                <td>
+                  <div className="table-actions">
+                    <button className="table-action" type="button" onClick={() => onResetPassword(user)} disabled={isSubmitting}>
+                      重置密码
+                    </button>
+                    <button
+                      className={`table-action ${user.enabled ? "table-action-danger" : ""}`}
+                      type="button"
+                      onClick={() => onUpdate(user, { enabled: !user.enabled })}
+                      disabled={isSubmitting || isSelf}
+                    >
+                      {user.enabled ? "停用" : "启用"}
+                    </button>
+                  </div>
+                  {isSelf ? <small>当前账号</small> : null}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {users.length === 0 ? <p className="empty">暂无用户。</p> : null}
+    </div>
+  );
+}
+
 function ReservationsTable({
   records,
   onToggleReceipt,
   onDelete,
+  canProcess,
+  canDelete,
   isSubmitting,
 }: {
   records: ReservationRecord[];
   onToggleReceipt: (record: ReservationRecord) => void;
   onDelete: (record: ReservationRecord) => void;
+  canProcess: boolean;
+  canDelete: boolean;
   isSubmitting: boolean;
 }) {
   return (
@@ -956,7 +1272,7 @@ function ReservationsTable({
             <th>数量</th>
             <th>单位</th>
             <th>提交时间</th>
-            <th>操作</th>
+            {canProcess || canDelete ? <th>操作</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -972,27 +1288,33 @@ function ReservationsTable({
                 <td>{record.quantity}</td>
                 <td>{record.unit}</td>
                 <td>{record.createdAt.slice(0, 10)}</td>
-                <td>
-                  <div className="table-actions">
-                    <button
-                      className={`table-action ${isReceived ? "table-action-muted" : ""}`}
-                      type="button"
-                      onClick={() => onToggleReceipt(record)}
-                      disabled={isSubmitting}
-                    >
-                      {isReceived ? "已入研发库" : "需从仓储领取"}
-                    </button>
-                    <button
-                      className="table-action table-action-danger"
-                      type="button"
-                      onClick={() => onDelete(record)}
-                      disabled={isSubmitting}
-                    >
-                      删除
-                    </button>
-                  </div>
-                  {isReceived ? <small>{record.receivedAt.slice(0, 10)}</small> : null}
-                </td>
+                {canProcess || canDelete ? (
+                  <td>
+                    <div className="table-actions">
+                      {canProcess ? (
+                        <button
+                          className={`table-action ${isReceived ? "table-action-muted" : ""}`}
+                          type="button"
+                          onClick={() => onToggleReceipt(record)}
+                          disabled={isSubmitting}
+                        >
+                          {isReceived ? "已入研发库" : "需从仓储领取"}
+                        </button>
+                      ) : null}
+                      {canDelete ? (
+                        <button
+                          className="table-action table-action-danger"
+                          type="button"
+                          onClick={() => onDelete(record)}
+                          disabled={isSubmitting}
+                        >
+                          删除
+                        </button>
+                      ) : null}
+                    </div>
+                    {isReceived ? <small>{record.receivedAt.slice(0, 10)}</small> : null}
+                  </td>
+                ) : null}
               </tr>
             );
           })}

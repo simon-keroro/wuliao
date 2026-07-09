@@ -24,14 +24,32 @@ on a VPS.
 Required production environment variables:
 
 ```bash
-APP_PASSWORD="change-this-password"
 SESSION_SECRET="change-this-long-random-secret"
 DATABASE_PATH="./data/materials.sqlite"
+BOOTSTRAP_ADMIN_USERNAME="admin"
+BOOTSTRAP_ADMIN_PASSWORD="change-this-admin-password"
+BOOTSTRAP_ADMIN_NAME="系统管理员"
 ```
 
 Make sure the `data/` directory is writable by the process that runs
 `npm run start`. If `DATABASE_PATH` is omitted, the app uses
 `./data/materials.sqlite`.
+
+On first startup, the app creates the first enabled system administrator from
+`BOOTSTRAP_ADMIN_USERNAME`, `BOOTSTRAP_ADMIN_PASSWORD`, and
+`BOOTSTRAP_ADMIN_NAME`. If `BOOTSTRAP_ADMIN_PASSWORD` is omitted, the app falls
+back to the older `APP_PASSWORD` value so existing VPS deployments can still
+create the initial administrator during upgrade.
+
+After the first administrator exists, manage users from the in-app `用户管理`
+page instead of editing `.env`.
+
+User roles:
+
+- `系统管理员`: manage users, run manual backups, reset demo data, and perform all material workflows.
+- `物料管理员`: manage inventory, usage records, reservations, and reservation receipt status.
+- `普通用户`: create usage records and warehouse reservations, and view inventory data.
+- `只读用户`: view inventory, records, and reservation lists only.
 
 ## Weekly Database Backup
 

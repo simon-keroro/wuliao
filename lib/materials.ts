@@ -1,3 +1,38 @@
+import type { Permission, UserRole } from "@/lib/permissions";
+
+export type CurrentUser = {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  permissions: Permission[];
+};
+
+export type PublicUser = {
+  id: string;
+  username: string;
+  displayName: string;
+  role: UserRole;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt: string;
+};
+
+export type UserInput = {
+  username?: string;
+  displayName?: string;
+  password?: string;
+  role?: UserRole;
+};
+
+export type UserUpdateInput = {
+  id?: string;
+  displayName?: string;
+  role?: UserRole;
+  enabled?: boolean;
+};
+
 export type MaterialBatch = {
   id: string;
   sapNo: string;

@@ -1,4 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { CurrentUser } from "@/lib/materials";
+import { getCurrentUserById } from "@/lib/server/store";
 
 const COOKIE_NAME = "materials_session";
 const ONE_WEEK_SECONDS = 60 * 60 * 24 * 7;
@@ -7,12 +9,8 @@ function getSessionSecret() {
   return process.env.SESSION_SECRET || process.env.APP_PASSWORD || "local-development-secret";
 }
 
-function getExpectedPassword() {
-  return process.env.APP_PASSWORD ?? "";
-}
-
-function signSession() {
-  return createHmac("sha256", getSessionSecret()).update("materials-shared-session").digest("base64url");
+function signSession(userId: string) {
+  return createHmac("sha256", getSessionSecret()).update(`materials-user-session:${userId}`).digest("base64url");
 }
 
 function safeEqual(left: string, right: string) {
@@ -31,20 +29,27 @@ function readCookie(request: Request, name: string) {
   return "";
 }
 
-export function validatePassword(password: string) {
-  const expected = getExpectedPassword();
-  if (!expected) {
-    throw new Error("服务器尚未设置 APP_PASSWORD，不能登录。");
-  }
-  return safeEqual(password, expected);
+function readSession(request: Request) {
+  const value = readCookie(request, COOKIE_NAME);
+  const [userId, signature] = value.split(".");
+  if (!userId || !signature) return null;
+  if (!safeEqual(signature, signSession(userId))) return null;
+  return userId;
+}
+
+export function getCurrentUser(request: Request): CurrentUser | null {
+  const userId = readSession(request);
+  if (!userId) return null;
+  return getCurrentUserById(userId);
 }
 
 export function isAuthenticated(request: Request) {
-  return safeEqual(readCookie(request, COOKIE_NAME), signSession());
+  return Boolean(getCurrentUser(request));
 }
 
-export function sessionCookie() {
-  return `${COOKIE_NAME}=${encodeURIComponent(signSession())}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ONE_WEEK_SECONDS}`;
+export function sessionCookie(user: CurrentUser) {
+  const value = `${user.id}.${signSession(user.id)}`;
+  return `${COOKIE_NAME}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ONE_WEEK_SECONDS}`;
 }
 
 export function clearSessionCookie() {

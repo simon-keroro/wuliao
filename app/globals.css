@@ -93,6 +93,13 @@ input:disabled {
   font-weight: 700;
 }
 
+.user-status {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
 h1,
 h2,
 p {
@@ -328,6 +335,12 @@ textarea:focus {
   gap: 14px;
 }
 
+.user-form {
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+}
+
 .wide,
 .form-actions {
   grid-column: 1 / -1;
@@ -362,6 +375,10 @@ table {
   width: 100%;
   min-width: 1220px;
   border-collapse: collapse;
+}
+
+.users-table table {
+  min-width: 900px;
 }
 
 th,

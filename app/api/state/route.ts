@@ -1,11 +1,11 @@
 import { getInventoryState } from "@/lib/server/store";
-import { jsonError, requireAuth } from "@/lib/server/http";
+import { jsonError, requirePermission } from "@/lib/server/http";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const unauthorized = requireAuth(request);
-  if (unauthorized) return unauthorized;
+  const user = requirePermission(request, "inventory:read");
+  if (user instanceof Response) return user;
 
   try {
     return Response.json(getInventoryState());
