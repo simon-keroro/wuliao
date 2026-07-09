@@ -33,6 +33,47 @@ Make sure the `data/` directory is writable by the process that runs
 `npm run start`. If `DATABASE_PATH` is omitted, the app uses
 `./data/materials.sqlite`.
 
+## Weekly Database Backup
+
+The VPS can send a weekly database backup email every Monday at 08:00 China
+time. The backup includes a recoverable SQLite snapshot and a readable JSON
+export of materials, usage records, and reservation records.
+
+Configure these environment variables on the VPS:
+
+```bash
+BACKUP_SMTP_HOST="smtp.gmail.com"
+BACKUP_SMTP_PORT="465"
+BACKUP_SMTP_USER="your-sender@gmail.com"
+BACKUP_SMTP_PASS="your-gmail-app-password"
+BACKUP_EMAIL_TO="kerorosen@gmail.com"
+```
+
+Use a Gmail app password for `BACKUP_SMTP_PASS`; do not use the normal Gmail
+login password.
+
+Run one backup manually:
+
+```bash
+npm run backup:database
+```
+
+Generate backup files without sending email, useful for local verification:
+
+```bash
+BACKUP_DRY_RUN=1 npm run backup:database
+```
+
+Example VPS cron entry for Monday 08:00 China time:
+
+```cron
+TZ=Asia/Shanghai
+0 8 * * 1 cd /path/to/app && npm run backup:database >> ./backups/backup.log 2>&1
+```
+
+The in-app `备份数据库` button uses the same SMTP configuration and sends the
+same backup attachments to `kerorosen@gmail.com`.
+
 This starter does not use `wrangler.jsonc`.
 
 ## Included Shape

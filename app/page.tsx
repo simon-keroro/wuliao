@@ -7,6 +7,12 @@ import { APP_DISPLAY_TITLE } from "@/lib/version";
 type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList";
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
+type BackupResponse = {
+  ok: boolean;
+  sent: boolean;
+  to: string;
+  generatedAt: string;
+};
 
 const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
 function getTodayDate() {
@@ -132,6 +138,7 @@ export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isBackingUp, setIsBackingUp] = useState(false);
   const [query, setQuery] = useState("");
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
@@ -260,6 +267,22 @@ export default function Home() {
       setMessage(error instanceof Error ? error.message : "退出失败。");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleBackupDatabase() {
+    setIsBackingUp(true);
+    try {
+      const result = await requestJson<BackupResponse>("/api/backup-database", { method: "POST" });
+      setMessage(
+        result.sent
+          ? `数据库备份已发送至 ${result.to || "kerorosen@gmail.com"}。备份时间：${result.generatedAt}`
+          : `数据库备份文件已生成，当前为测试模式，未发送邮件。备份时间：${result.generatedAt}`,
+      );
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "数据库备份发送失败。");
+    } finally {
+      setIsBackingUp(false);
     }
   }
 
@@ -448,6 +471,9 @@ export default function Home() {
         <div className="top-actions">
           <button className="secondary" onClick={() => exportCsv("库存总览.csv", materials.map(formatMaterialExport))}>
             导出库存
+          </button>
+          <button className="secondary" onClick={handleBackupDatabase} disabled={isBackingUp || isSubmitting}>
+            {isBackingUp ? "正在备份" : "备份数据库"}
           </button>
           <button className="secondary" onClick={() => exportCsv("领用记录.csv", usageRecords.map(formatUsageExport))}>
             导出流水
