@@ -46,10 +46,15 @@ page instead of editing `.env`.
 
 User roles:
 
-- `系统管理员`: manage users, run manual backups, reset demo data, and perform all material workflows.
+- `系统管理员`: manage users, view operation logs, run manual backups, reset demo data, and perform all material workflows.
 - `物料管理员`: manage inventory, usage records, reservations, and reservation receipt status.
 - `普通用户`: create usage records and warehouse reservations, and view inventory data.
 - `只读用户`: view inventory, records, and reservation lists only.
+
+All signed-in users can change their own password from the top action bar.
+Operation logs record sign-in, sign-out, password changes, user management,
+inventory, usage, reservation, backup, and other key actions. Only system
+administrators can view operation logs in the app.
 
 ## Weekly Database Backup
 

@@ -17,6 +17,7 @@ export type Permission =
   | "reservation:delete"
   | "backup:run"
   | "users:manage"
+  | "audit:read"
   | "demo:reset";
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
@@ -30,6 +31,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "reservation:delete",
     "backup:run",
     "users:manage",
+    "audit:read",
     "demo:reset",
   ],
   manager: [

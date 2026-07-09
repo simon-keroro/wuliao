@@ -381,6 +381,10 @@ table {
   min-width: 900px;
 }
 
+.audit-table table {
+  min-width: 980px;
+}
+
 th,
 td {
   border-bottom: 1px solid var(--line);

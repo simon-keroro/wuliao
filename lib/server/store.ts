@@ -5,11 +5,13 @@ import { DatabaseSync } from "node:sqlite";
 import {
   initialMaterials,
   initialUsage,
+  type AuditLog,
   type CurrentUser,
   type InventoryState,
   type MaterialBatch,
   type MaterialInput,
   type MaterialUpdateInput,
+  type PasswordChangeInput,
   type PublicUser,
   type ReservationInput,
   type ReservationRecord,
@@ -78,6 +80,16 @@ type UserRow = {
   created_at: string;
   updated_at: string;
   last_login_at: string;
+};
+
+type AuditLogRow = {
+  id: string;
+  user_id: string;
+  username: string;
+  action: string;
+  target: string;
+  details: string;
+  created_at: string;
 };
 
 let cachedDb: DatabaseSync | null = null;
@@ -258,6 +270,18 @@ function currentUserFromRow(row: UserRow): CurrentUser {
     displayName: user.displayName,
     role: user.role,
     permissions: getPermissions(user.role),
+  };
+}
+
+function auditLogFromRow(row: AuditLogRow): AuditLog {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    username: row.username,
+    action: row.action,
+    target: row.target,
+    details: row.details,
+    createdAt: row.created_at,
   };
 }
 
@@ -529,7 +553,9 @@ export function authenticateUser(username: string, password: string): CurrentUse
   const now = new Date().toISOString();
   db.prepare("UPDATE users SET last_login_at = ?, updated_at = ? WHERE id = ?").run(now, now, row.id);
   const updated = db.prepare("SELECT * FROM users WHERE id = ?").get(row.id) as UserRow;
-  return currentUserFromRow(updated);
+  const user = currentUserFromRow(updated);
+  logAudit(user, "auth.login", user.username, {});
+  return user;
 }
 
 export function getCurrentUserById(userId: string): CurrentUser | null {
@@ -612,6 +638,34 @@ export function resetUserPassword(id: string, password: string, actor: CurrentUs
   db.prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?").run(hashPassword(password), now, userId);
   logAudit(actor, "user.password.reset", current.username, {});
   return listUsers();
+}
+
+export function changeOwnPassword(input: PasswordChangeInput, actor: CurrentUser): CurrentUser {
+  const currentPassword = input.currentPassword ?? "";
+  const newPassword = input.newPassword ?? "";
+  if (!currentPassword) throw new Error("请输入当前密码。");
+  if (newPassword.length < 6) throw new Error("新密码至少需要 6 位。");
+
+  const db = getDatabase();
+  const row = db.prepare("SELECT * FROM users WHERE id = ?").get(actor.id) as UserRow | undefined;
+  if (!row || !row.enabled) throw new Error("当前账号不存在或已停用。");
+  if (!verifyPassword(currentPassword, row.password_hash)) throw new Error("当前密码不正确。");
+
+  const now = new Date().toISOString();
+  db.prepare("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?").run(hashPassword(newPassword), now, actor.id);
+  logAudit(actor, "user.password.change", actor.username, {});
+  const updated = db.prepare("SELECT * FROM users WHERE id = ?").get(actor.id) as UserRow;
+  return currentUserFromRow(updated);
+}
+
+export function listAuditLogs(actor: CurrentUser, includeAllUsers: boolean): AuditLog[] {
+  const db = getDatabase();
+  const rows = includeAllUsers
+    ? (db.prepare("SELECT * FROM audit_logs ORDER BY created_at DESC, id DESC LIMIT 500").all() as AuditLogRow[])
+    : (db
+        .prepare("SELECT * FROM audit_logs WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 500")
+        .all(actor.id) as AuditLogRow[]);
+  return rows.map(auditLogFromRow);
 }
 
 export function logAudit(user: CurrentUser, action: string, target: string, details: Record<string, unknown>) {

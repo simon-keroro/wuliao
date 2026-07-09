@@ -19,6 +19,16 @@ export type PublicUser = {
   lastLoginAt: string;
 };
 
+export type AuditLog = {
+  id: string;
+  userId: string;
+  username: string;
+  action: string;
+  target: string;
+  details: string;
+  createdAt: string;
+};
+
 export type UserInput = {
   username?: string;
   displayName?: string;
@@ -31,6 +41,11 @@ export type UserUpdateInput = {
   displayName?: string;
   role?: UserRole;
   enabled?: boolean;
+};
+
+export type PasswordChangeInput = {
+  currentPassword?: string;
+  newPassword?: string;
 };
 
 export type MaterialBatch = {

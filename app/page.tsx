@@ -1,11 +1,19 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import type { CurrentUser, InventoryState, MaterialBatch, PublicUser, ReservationRecord, UsageRecord } from "@/lib/materials";
+import type {
+  AuditLog,
+  CurrentUser,
+  InventoryState,
+  MaterialBatch,
+  PublicUser,
+  ReservationRecord,
+  UsageRecord,
+} from "@/lib/materials";
 import { ROLE_LABELS, type Permission, type UserRole } from "@/lib/permissions";
 import { APP_DISPLAY_TITLE } from "@/lib/version";
 
-type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList" | "users";
+type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList" | "users" | "auditLogs";
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
 type BackupResponse = {
@@ -19,6 +27,10 @@ type MeResponse = {
 };
 type UsersResponse = {
   users: PublicUser[];
+};
+type AuditLogsResponse = {
+  logs: AuditLog[];
+  scope: "all" | "self";
 };
 
 const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
@@ -65,6 +77,12 @@ const emptyUserForm = {
   displayName: "",
   password: "",
   role: "user" as UserRole,
+};
+
+const emptyPasswordForm = {
+  currentPassword: "",
+  newPassword: "",
+  confirmPassword: "",
 };
 
 function daysUntil(dateValue: string) {
@@ -145,8 +163,11 @@ export default function Home() {
   const [reservationRecords, setReservationRecords] = useState<ReservationRecord[]>([]);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [users, setUsers] = useState<PublicUser[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditScope, setAuditScope] = useState<"all" | "self">("self");
   const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
   const [userForm, setUserForm] = useState(() => ({ ...emptyUserForm }));
+  const [passwordForm, setPasswordForm] = useState(() => ({ ...emptyPasswordForm }));
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [materialToDelete, setMaterialToDelete] = useState<MaterialBatch | null>(null);
   const [passwordResetUser, setPasswordResetUser] = useState<PublicUser | null>(null);
@@ -158,6 +179,8 @@ export default function Home() {
   const [backupPassword, setBackupPassword] = useState("");
   const [backupDialogMessage, setBackupDialogMessage] = useState("");
   const [isBackupDialogOpen, setIsBackupDialogOpen] = useState(false);
+  const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
+  const [passwordDialogMessage, setPasswordDialogMessage] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -222,10 +245,12 @@ export default function Home() {
   const canDeleteReservation = hasPermission("reservation:delete");
   const canRunBackup = hasPermission("backup:run");
   const canManageUsers = hasPermission("users:manage");
+  const canReadAuditLogs = hasPermission("audit:read");
   const activeView: Tab =
     activeTab === "inventory" ||
     activeTab === "records" ||
     activeTab === "reservationList" ||
+    (activeTab === "auditLogs" && canReadAuditLogs) ||
     (activeTab === "intake" && canWriteInventory) ||
     (activeTab === "usage" && canCreateUsage) ||
     (activeTab === "warehouseRequest" && canCreateReservation) ||
@@ -289,6 +314,12 @@ export default function Home() {
     setUsers(payload.users);
   }, [canManageUsers]);
 
+  const loadAuditLogs = useCallback(async () => {
+    const payload = await requestJson<AuditLogsResponse>("/api/audit-logs");
+    setAuditLogs(payload.logs);
+    setAuditScope(payload.scope);
+  }, []);
+
   async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
@@ -337,6 +368,47 @@ export default function Home() {
     setBackupPassword("");
     setBackupDialogMessage("");
     setIsBackupDialogOpen(false);
+  }
+
+  function openPasswordDialog() {
+    setPasswordForm({ ...emptyPasswordForm });
+    setPasswordDialogMessage("");
+    setIsPasswordDialogOpen(true);
+  }
+
+  function closePasswordDialog() {
+    if (isSubmitting) return;
+    setPasswordForm({ ...emptyPasswordForm });
+    setPasswordDialogMessage("");
+    setIsPasswordDialogOpen(false);
+  }
+
+  async function handleChangeOwnPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPasswordDialogMessage("");
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordDialogMessage("两次输入的新密码不一致。");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const payload = await requestJson<MeResponse>("/api/me/password", {
+        method: "POST",
+        body: JSON.stringify({
+          currentPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+        }),
+      });
+      setCurrentUser(payload.user);
+      setPasswordForm({ ...emptyPasswordForm });
+      setIsPasswordDialogOpen(false);
+      setMessage("密码已修改。");
+    } catch (error) {
+      setPasswordDialogMessage(error instanceof Error ? error.message : "修改密码失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   async function handleBackupDatabase(event: FormEvent<HTMLFormElement>) {
@@ -633,6 +705,9 @@ export default function Home() {
           <button className="secondary" onClick={loadState} disabled={isSubmitting || isLoading}>
             刷新
           </button>
+          <button className="secondary" onClick={openPasswordDialog} disabled={isSubmitting}>
+            修改密码
+          </button>
           <button className="secondary" onClick={handleLogout} disabled={isSubmitting}>
             退出
           </button>
@@ -659,6 +734,19 @@ export default function Home() {
           <TabButton active={activeView === "warehouseRequest"} tone="request" onClick={() => setActiveTab("warehouseRequest")}>从仓储领料预约</TabButton>
         ) : null}
         <TabButton active={activeView === "reservationList"} tone="schedule" onClick={() => setActiveTab("reservationList")}>预约清单</TabButton>
+        {canReadAuditLogs ? (
+          <TabButton
+            active={activeView === "auditLogs"}
+            onClick={() => {
+              setActiveTab("auditLogs");
+              void loadAuditLogs().catch((error) => {
+                setMessage(error instanceof Error ? error.message : "读取操作日志失败。");
+              });
+            }}
+          >
+            操作日志
+          </TabButton>
+        ) : null}
         {canManageUsers ? (
           <TabButton
             active={activeView === "users"}
@@ -862,6 +950,19 @@ export default function Home() {
         </section>
       )}
 
+      {activeView === "auditLogs" && canReadAuditLogs ? (
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <h2>操作日志</h2>
+              <p>{auditScope === "all" ? "系统管理员正在查看全部用户日志。" : "当前显示你的个人操作日志。"}</p>
+            </div>
+            <button className="secondary" onClick={loadAuditLogs} disabled={isSubmitting}>刷新日志</button>
+          </div>
+          <AuditLogsTable logs={auditLogs} showUser={auditScope === "all"} />
+        </section>
+      ) : null}
+
       {activeView === "users" && canManageUsers ? (
         <section className="panel">
           <div className="panel-heading">
@@ -968,6 +1069,58 @@ export default function Home() {
                 </button>
                 <button className="primary" type="submit" disabled={isSubmitting}>
                   确认重置
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
+      {isPasswordDialogOpen ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="change-password-title">
+            <h2 id="change-password-title">修改密码</h2>
+            <form className="dialog-form" onSubmit={handleChangeOwnPassword}>
+              <label>
+                当前密码
+                <input
+                  type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={(event) => setPasswordForm({ ...passwordForm, currentPassword: event.target.value })}
+                  autoFocus
+                  required
+                  disabled={isSubmitting}
+                />
+              </label>
+              <label>
+                新密码
+                <input
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(event) => setPasswordForm({ ...passwordForm, newPassword: event.target.value })}
+                  required
+                  minLength={6}
+                  disabled={isSubmitting}
+                />
+              </label>
+              <label>
+                确认新密码
+                <input
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(event) => setPasswordForm({ ...passwordForm, confirmPassword: event.target.value })}
+                  required
+                  minLength={6}
+                  disabled={isSubmitting}
+                />
+              </label>
+              {passwordDialogMessage ? <p className="dialog-error">{passwordDialogMessage}</p> : null}
+              <div className="dialog-actions">
+                <button className="secondary" type="button" onClick={closePasswordDialog} disabled={isSubmitting}>
+                  取消
+                </button>
+                <button className="primary" type="submit" disabled={isSubmitting}>
+                  确认修改
                 </button>
               </div>
             </form>
@@ -1160,6 +1313,68 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
         </tbody>
       </table>
       {records.length === 0 ? <p className="empty">没有匹配的领用记录。</p> : null}
+    </div>
+  );
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  "auth.login": "登录系统",
+  "auth.logout": "退出系统",
+  "material.create": "新增入库",
+  "material.update": "编辑物料",
+  "material.delete": "删除物料",
+  "usage.create": "领用登记",
+  "reservation.create": "提交预约",
+  "reservation.receive": "入研发库",
+  "reservation.undoReceive": "撤销入研发库",
+  "reservation.delete": "删除预约",
+  "backup.run": "备份数据库",
+  "user.create": "新增用户",
+  "user.update": "更新用户",
+  "user.password.reset": "管理员重置密码",
+  "user.password.change": "本人修改密码",
+  "audit.view": "查看操作日志",
+  "demo.reset": "恢复演示数据",
+};
+
+function formatAuditDetails(details: string) {
+  if (!details || details === "{}") return "-";
+  try {
+    const parsed = JSON.parse(details) as Record<string, unknown>;
+    const entries = Object.entries(parsed).filter(([, value]) => value !== "" && value !== undefined && value !== null);
+    if (entries.length === 0) return "-";
+    return entries.map(([key, value]) => `${key}: ${String(value)}`).join("；");
+  } catch {
+    return details;
+  }
+}
+
+function AuditLogsTable({ logs, showUser }: { logs: AuditLog[]; showUser: boolean }) {
+  return (
+    <div className="table-wrap audit-table">
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            {showUser ? <th>用户</th> : null}
+            <th>操作</th>
+            <th>对象</th>
+            <th>详情</th>
+          </tr>
+        </thead>
+        <tbody>
+          {logs.map((log) => (
+            <tr key={log.id}>
+              <td>{log.createdAt.replace("T", " ").slice(0, 19)}</td>
+              {showUser ? <td><strong>{log.username}</strong></td> : null}
+              <td>{ACTION_LABELS[log.action] ?? log.action}</td>
+              <td>{log.target || "-"}</td>
+              <td>{formatAuditDetails(log.details)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {logs.length === 0 ? <p className="empty">暂无操作日志。</p> : null}
     </div>
   );
 }
