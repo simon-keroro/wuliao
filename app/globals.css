@@ -385,6 +385,30 @@ table {
   min-width: 980px;
 }
 
+.audit-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  margin-bottom: 16px;
+  padding: 14px;
+}
+
+.audit-filter-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 42px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 th,
 td {
   border-bottom: 1px solid var(--line);
@@ -573,6 +597,17 @@ small {
     grid-template-columns: 1fr;
   }
 
+  .audit-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .audit-filter-actions {
+    align-items: stretch;
+    flex-direction: column;
+    grid-column: 1 / -1;
+    white-space: normal;
+  }
+
   .tab-request {
     margin-left: 0;
   }
@@ -589,6 +624,10 @@ small {
 
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .audit-filters {
+    grid-template-columns: 1fr;
   }
 
   .stat {

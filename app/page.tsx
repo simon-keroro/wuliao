@@ -165,6 +165,10 @@ export default function Home() {
   const [users, setUsers] = useState<PublicUser[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditScope, setAuditScope] = useState<"all" | "self">("self");
+  const [auditStartDate, setAuditStartDate] = useState("");
+  const [auditEndDate, setAuditEndDate] = useState("");
+  const [auditUserFilter, setAuditUserFilter] = useState("all");
+  const [auditActionFilter, setAuditActionFilter] = useState("all");
   const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
   const [userForm, setUserForm] = useState(() => ({ ...emptyUserForm }));
   const [passwordForm, setPasswordForm] = useState(() => ({ ...emptyPasswordForm }));
@@ -307,6 +311,34 @@ export default function Home() {
             .includes(keyword),
     );
   }, [reservationRecords, query]);
+
+  const auditUserOptions = useMemo(() => {
+    return Array.from(new Set(auditLogs.map((log) => log.username).filter(Boolean))).sort();
+  }, [auditLogs]);
+
+  const auditActionOptions = useMemo(() => {
+    return Array.from(new Set(auditLogs.map((log) => log.action).filter(Boolean))).sort((left, right) =>
+      (ACTION_LABELS[left] ?? left).localeCompare(ACTION_LABELS[right] ?? right, "zh-CN"),
+    );
+  }, [auditLogs]);
+
+  const filteredAuditLogs = useMemo(() => {
+    return auditLogs.filter((log) => {
+      const logDate = log.createdAt.slice(0, 10);
+      const matchesStart = !auditStartDate || logDate >= auditStartDate;
+      const matchesEnd = !auditEndDate || logDate <= auditEndDate;
+      const matchesUser = auditUserFilter === "all" || log.username === auditUserFilter;
+      const matchesAction = auditActionFilter === "all" || log.action === auditActionFilter;
+      return matchesStart && matchesEnd && matchesUser && matchesAction;
+    });
+  }, [auditActionFilter, auditEndDate, auditLogs, auditStartDate, auditUserFilter]);
+
+  function resetAuditFilters() {
+    setAuditStartDate("");
+    setAuditEndDate("");
+    setAuditUserFilter("all");
+    setAuditActionFilter("all");
+  }
 
   const loadUsers = useCallback(async () => {
     if (!canManageUsers) return;
@@ -959,7 +991,39 @@ export default function Home() {
             </div>
             <button className="secondary" onClick={loadAuditLogs} disabled={isSubmitting}>刷新日志</button>
           </div>
-          <AuditLogsTable logs={auditLogs} showUser={auditScope === "all"} />
+          <div className="audit-filters">
+            <label>
+              开始日期
+              <input type="date" value={auditStartDate} onChange={(event) => setAuditStartDate(event.target.value)} />
+            </label>
+            <label>
+              结束日期
+              <input type="date" value={auditEndDate} onChange={(event) => setAuditEndDate(event.target.value)} />
+            </label>
+            <label>
+              用户
+              <select value={auditUserFilter} onChange={(event) => setAuditUserFilter(event.target.value)}>
+                <option value="all">全部用户</option>
+                {auditUserOptions.map((username) => (
+                  <option key={username} value={username}>{username}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              操作
+              <select value={auditActionFilter} onChange={(event) => setAuditActionFilter(event.target.value)}>
+                <option value="all">全部操作</option>
+                {auditActionOptions.map((action) => (
+                  <option key={action} value={action}>{ACTION_LABELS[action] ?? action}</option>
+                ))}
+              </select>
+            </label>
+            <div className="audit-filter-actions">
+              <span>显示 {filteredAuditLogs.length} / {auditLogs.length} 条</span>
+              <button className="secondary" type="button" onClick={resetAuditFilters}>清空筛选</button>
+            </div>
+          </div>
+          <AuditLogsTable logs={filteredAuditLogs} showUser={auditScope === "all"} />
         </section>
       ) : null}
 
