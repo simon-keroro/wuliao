@@ -42,6 +42,10 @@ type AuditLogsResponse = {
   logs: AuditLog[];
   scope: "all" | "self";
 };
+type SuggestionOption = {
+  value: string;
+  description?: string;
+};
 
 const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
 function getTodayDate() {
@@ -123,6 +127,18 @@ function getStockStatus(batch: MaterialBatch) {
     return { key: "low", label: "低库存", tone: "warning" };
   }
   return { key: "enough", label: "充足", tone: "success" };
+}
+
+function uniqueTextOptions(materials: MaterialBatch[], getValue: (batch: MaterialBatch) => string): SuggestionOption[] {
+  const seen = new Set<string>();
+  const options: SuggestionOption[] = [];
+  for (const batch of materials) {
+    const value = getValue(batch).trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    options.push({ value });
+  }
+  return options;
 }
 
 function exportCsv(filename: string, rows: Record<string, string | number>[]) {
@@ -319,6 +335,28 @@ export default function Home() {
       return matchesKeyword && matchesExpiry && matchesStock;
     });
   }, [materials, query, expiryFilter, stockFilter]);
+
+  const latestMaterialBySap = useMemo(() => {
+    const map = new Map<string, MaterialBatch>();
+    for (const batch of materials) {
+      if (batch.sapNo && !map.has(batch.sapNo)) map.set(batch.sapNo, batch);
+    }
+    return map;
+  }, [materials]);
+
+  const sapNoOptions = useMemo(() => {
+    return Array.from(latestMaterialBySap.values()).map((batch) => ({
+      value: batch.sapNo,
+      description: [batch.name, batch.specification, batch.supplier].filter(Boolean).join(" / "),
+    }));
+  }, [latestMaterialBySap]);
+
+  const materialNameOptions = useMemo(() => uniqueTextOptions(materials, (batch) => batch.name), [materials]);
+  const categoryOptions = useMemo(() => uniqueTextOptions(materials, (batch) => batch.category), [materials]);
+  const specificationOptions = useMemo(() => uniqueTextOptions(materials, (batch) => batch.specification), [materials]);
+  const unitOptions = useMemo(() => uniqueTextOptions(materials, (batch) => batch.unit), [materials]);
+  const supplierOptions = useMemo(() => uniqueTextOptions(materials, (batch) => batch.supplier), [materials]);
+  const storageLocationOptions = useMemo(() => uniqueTextOptions(materials, (batch) => batch.storageLocation), [materials]);
 
   const issuedUsageRecords = useMemo(() => {
     return usageRecords.filter((record) => record.status === "issued");
@@ -598,6 +636,23 @@ export default function Home() {
     setMaterialForm({ ...emptyMaterial, receivedDate: getTodayDate() });
     setMessage("");
     setActiveTab("inventory");
+  }
+
+  function updateMaterialSapNo(sapNo: string) {
+    setMaterialForm((form) => {
+      const normalizedSapNo = sapNo.trim();
+      const template = latestMaterialBySap.get(normalizedSapNo);
+      if (!template) return { ...form, sapNo };
+      return {
+        ...form,
+        sapNo: normalizedSapNo,
+        name: template.name,
+        category: template.category,
+        specification: template.specification,
+        unit: template.unit,
+        supplier: template.supplier,
+      };
+    });
   }
 
   function selectUsageMaterial(batch: MaterialBatch) {
@@ -992,14 +1047,57 @@ export default function Home() {
             ) : null}
           </div>
           <form className="form-grid" onSubmit={handleMaterialSubmit}>
-            <TextInput label="SAP号" value={materialForm.sapNo} onChange={(sapNo) => setMaterialForm({ ...materialForm, sapNo })} placeholder="8位数字" pattern="[0-9]{8}" maxLength={8} />
-            <TextInput label="物料名称" value={materialForm.name} onChange={(name) => setMaterialForm({ ...materialForm, name })} required />
-            <TextInput label="分类" value={materialForm.category} onChange={(category) => setMaterialForm({ ...materialForm, category })} placeholder="试剂 / 耗材 / 标准品" />
-            <TextInput label="规格" value={materialForm.specification} onChange={(specification) => setMaterialForm({ ...materialForm, specification })} placeholder="500 mL/瓶" />
-            <TextInput label="单位" value={materialForm.unit} onChange={(unit) => setMaterialForm({ ...materialForm, unit })} placeholder="瓶 / 盒 / g" />
+            <SuggestionInput
+              label="SAP号"
+              value={materialForm.sapNo}
+              onChange={updateMaterialSapNo}
+              options={sapNoOptions}
+              placeholder="8位数字"
+              pattern="[0-9]{8}"
+              maxLength={8}
+            />
+            <SuggestionInput
+              label="物料名称"
+              value={materialForm.name}
+              onChange={(name) => setMaterialForm({ ...materialForm, name })}
+              options={materialNameOptions}
+              required
+            />
+            <SuggestionInput
+              label="分类"
+              value={materialForm.category}
+              onChange={(category) => setMaterialForm({ ...materialForm, category })}
+              options={categoryOptions}
+              placeholder="试剂 / 耗材 / 标准品"
+            />
+            <SuggestionInput
+              label="规格"
+              value={materialForm.specification}
+              onChange={(specification) => setMaterialForm({ ...materialForm, specification })}
+              options={specificationOptions}
+              placeholder="500 mL/瓶"
+            />
+            <SuggestionInput
+              label="单位"
+              value={materialForm.unit}
+              onChange={(unit) => setMaterialForm({ ...materialForm, unit })}
+              options={unitOptions}
+              placeholder="瓶 / 盒 / g"
+            />
             <TextInput label="批号" value={materialForm.batchNo} onChange={(batchNo) => setMaterialForm({ ...materialForm, batchNo })} />
-            <TextInput label="供应商" value={materialForm.supplier} onChange={(supplier) => setMaterialForm({ ...materialForm, supplier })} />
-            <TextInput label="存放位置" value={materialForm.storageLocation} onChange={(storageLocation) => setMaterialForm({ ...materialForm, storageLocation })} placeholder="试剂柜 A-02" />
+            <SuggestionInput
+              label="供应商"
+              value={materialForm.supplier}
+              onChange={(supplier) => setMaterialForm({ ...materialForm, supplier })}
+              options={supplierOptions}
+            />
+            <SuggestionInput
+              label="存放位置"
+              value={materialForm.storageLocation}
+              onChange={(storageLocation) => setMaterialForm({ ...materialForm, storageLocation })}
+              options={storageLocationOptions}
+              placeholder="试剂柜 A-02"
+            />
             <TextInput label="入库日期" type="date" value={materialForm.receivedDate} onChange={(receivedDate) => setMaterialForm({ ...materialForm, receivedDate })} />
             <TextInput label="有效期" type="date" value={materialForm.expiryDate} onChange={(expiryDate) => setMaterialForm({ ...materialForm, expiryDate })} />
             <TextInput label="入库数量" type="number" value={materialForm.initialQuantity} onChange={(initialQuantity) => setMaterialForm({ ...materialForm, initialQuantity })} required min="0" step="0.01" />
@@ -1501,6 +1599,76 @@ function TextInput({
         pattern={pattern}
         maxLength={maxLength}
       />
+    </label>
+  );
+}
+
+function SuggestionInput({
+  label,
+  value,
+  onChange,
+  options,
+  placeholder,
+  required,
+  pattern,
+  maxLength,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: SuggestionOption[];
+  placeholder?: string;
+  required?: boolean;
+  pattern?: string;
+  maxLength?: number;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const keyword = value.trim().toLowerCase();
+  const filteredOptions = options
+    .filter((option) => {
+      if (!keyword) return true;
+      return [option.value, option.description ?? ""].join(" ").toLowerCase().includes(keyword);
+    })
+    .slice(0, 10);
+
+  return (
+    <label className="material-field">
+      {label}
+      <input
+        value={value}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => {
+          window.setTimeout(() => setIsOpen(false), 120);
+        }}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setIsOpen(true);
+        }}
+        placeholder={placeholder}
+        required={required}
+        pattern={pattern}
+        maxLength={maxLength}
+      />
+      {isOpen ? (
+        <div className="material-picker">
+          {filteredOptions.map((option) => (
+            <button
+              className={`material-option ${option.value === value ? "selected" : ""}`}
+              key={`${label}-${option.value}`}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onChange(option.value);
+                setIsOpen(false);
+              }}
+            >
+              <strong>{option.value}</strong>
+              {option.description ? <span>{option.description}</span> : null}
+            </button>
+          ))}
+          {filteredOptions.length === 0 ? <p className="empty compact-empty">没有匹配的历史记录，可直接手动输入。</p> : null}
+        </div>
+      ) : null}
     </label>
   );
 }
