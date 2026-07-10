@@ -19,8 +19,9 @@ import {
   type UserUpdateInput,
   type UsageInput,
   type UsageRecord,
+  type UsageStatus,
 } from "@/lib/materials";
-import { getPermissions, isUserRole, type UserRole } from "@/lib/permissions";
+import { can, getPermissions, isUserRole, type UserRole } from "@/lib/permissions";
 import { hashPassword, verifyPassword } from "@/lib/server/password";
 
 type MaterialRow = {
@@ -54,6 +55,12 @@ type UsageRow = {
   used_quantity: number;
   purpose: string;
   notes: string;
+  status: string;
+  submitted_by_user_id: string;
+  submitted_by_username: string;
+  issued_at: string;
+  issued_by_user_id: string;
+  issued_by_username: string;
   created_at: string;
 };
 
@@ -146,6 +153,12 @@ function getDatabase() {
       used_quantity REAL NOT NULL,
       purpose TEXT NOT NULL,
       notes TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'issued',
+      submitted_by_user_id TEXT NOT NULL DEFAULT '',
+      submitted_by_username TEXT NOT NULL DEFAULT '',
+      issued_at TEXT NOT NULL DEFAULT '',
+      issued_by_user_id TEXT NOT NULL DEFAULT '',
+      issued_by_username TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       FOREIGN KEY (material_batch_id) REFERENCES materials(id)
     );
@@ -199,8 +212,15 @@ function getDatabase() {
   `);
   ensureColumn(db, "materials", "sap_no", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "sap_no", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "usage_records", "status", "TEXT NOT NULL DEFAULT 'issued'");
+  ensureColumn(db, "usage_records", "submitted_by_user_id", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "usage_records", "submitted_by_username", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "usage_records", "issued_at", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "usage_records", "issued_by_user_id", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "usage_records", "issued_by_username", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "reservation_records", "received_at", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "reservation_records", "received_batch_id", "TEXT NOT NULL DEFAULT ''");
+  migrateUsageRecordStatus(db);
 
   cachedDb = db;
   seedAdminUserIfEmpty(db);
@@ -212,6 +232,12 @@ function ensureColumn(db: DatabaseSync, table: string, column: string, definitio
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
   if (columns.some((item) => item.name === column)) return;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+}
+
+function migrateUsageRecordStatus(db: DatabaseSync) {
+  db.prepare("UPDATE usage_records SET status = 'issued' WHERE status NOT IN ('pending', 'issued') OR status = ''").run();
+  db.prepare("UPDATE usage_records SET issued_at = created_at WHERE status = 'issued' AND issued_at = ''").run();
+  db.prepare("UPDATE usage_records SET submitted_by_username = user_name WHERE submitted_by_username = ''").run();
 }
 
 function requiredBootstrapPassword() {
@@ -307,6 +333,10 @@ function materialFromRow(row: MaterialRow): MaterialBatch {
   };
 }
 
+function usageStatusFromRow(row: UsageRow): UsageStatus {
+  return row.status === "pending" ? "pending" : "issued";
+}
+
 function usageFromRow(row: UsageRow): UsageRecord {
   return {
     id: row.id,
@@ -319,6 +349,12 @@ function usageFromRow(row: UsageRow): UsageRecord {
     usedQuantity: row.used_quantity,
     purpose: row.purpose,
     notes: row.notes,
+    status: usageStatusFromRow(row),
+    submittedByUserId: row.submitted_by_user_id,
+    submittedByUsername: row.submitted_by_username,
+    issuedAt: row.issued_at,
+    issuedByUserId: row.issued_by_user_id,
+    issuedByUsername: row.issued_by_username,
     createdAt: row.created_at,
   };
 }
@@ -371,9 +407,10 @@ function insertUsage(db: DatabaseSync, record: UsageRecord) {
   db.prepare(`
     INSERT INTO usage_records (
       id, material_batch_id, sap_no, material_name, batch_no, user_name,
-      used_date, used_quantity, purpose, notes, created_at
+      used_date, used_quantity, purpose, notes, status, submitted_by_user_id,
+      submitted_by_username, issued_at, issued_by_user_id, issued_by_username, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     record.id,
     record.materialBatchId,
@@ -385,6 +422,12 @@ function insertUsage(db: DatabaseSync, record: UsageRecord) {
     record.usedQuantity,
     record.purpose,
     record.notes,
+    record.status,
+    record.submittedByUserId,
+    record.submittedByUsername,
+    record.issuedAt,
+    record.issuedByUserId,
+    record.issuedByUsername,
     record.createdAt,
   );
 }
@@ -787,7 +830,7 @@ export function deleteMaterial(materialBatchId: string): InventoryState {
   return getInventoryState();
 }
 
-export function createUsageRecord(input: UsageInput): InventoryState {
+export function createUsageRecord(input: UsageInput, actor: CurrentUser): InventoryState {
   const db = getDatabase();
   const materialBatchId = requiredText(input.materialBatchId);
   const userName = requiredText(input.userName);
@@ -818,21 +861,121 @@ export function createUsageRecord(input: UsageInput): InventoryState {
       usedQuantity,
       purpose: requiredText(input.purpose),
       notes: requiredText(input.notes),
+      status: "pending",
+      submittedByUserId: actor.id,
+      submittedByUsername: actor.username,
+      issuedAt: "",
+      issuedByUserId: "",
+      issuedByUsername: "",
       createdAt: now,
     };
 
     insertUsage(db, record);
-    db.prepare("UPDATE materials SET remaining_quantity = remaining_quantity - ?, updated_at = ? WHERE id = ?").run(
-      usedQuantity,
-      now,
-      batch.id,
-    );
     db.exec("COMMIT;");
   } catch (error) {
     db.exec("ROLLBACK;");
     throw error;
   }
 
+  return getInventoryState();
+}
+
+export function issueUsageRecord(usageRecordId: string, actor: CurrentUser): InventoryState {
+  const db = getDatabase();
+  const id = requiredText(usageRecordId);
+  if (!id) throw new Error("缺少要出库的领用记录。");
+
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const record = db.prepare("SELECT * FROM usage_records WHERE id = ?").get(id) as UsageRow | undefined;
+    if (!record) throw new Error("所选领用记录不存在，请刷新页面后重试。");
+    if (record.status === "issued") {
+      db.exec("COMMIT;");
+      return getInventoryState();
+    }
+
+    const batch = db.prepare("SELECT * FROM materials WHERE id = ?").get(record.material_batch_id) as
+      | MaterialRow
+      | undefined;
+    if (!batch) throw new Error("所选批次不存在，请刷新页面后重试。");
+    if (daysUntil(batch.expiry_date) < 0) throw new Error("该批次已过期，不能出库。");
+    if (record.used_quantity > batch.remaining_quantity) {
+      throw new Error(`出库量超过库存。当前可用 ${batch.remaining_quantity} ${batch.unit}。`);
+    }
+
+    const now = new Date().toISOString();
+    db.prepare("UPDATE materials SET remaining_quantity = remaining_quantity - ?, updated_at = ? WHERE id = ?").run(
+      record.used_quantity,
+      now,
+      batch.id,
+    );
+    db.prepare(`
+      UPDATE usage_records
+      SET status = 'issued', issued_at = ?, issued_by_user_id = ?, issued_by_username = ?
+      WHERE id = ?
+    `).run(now, actor.id, actor.username, id);
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+
+  return getInventoryState();
+}
+
+export function undoIssueUsageRecord(usageRecordId: string): InventoryState {
+  const db = getDatabase();
+  const id = requiredText(usageRecordId);
+  if (!id) throw new Error("缺少要撤销出库的领用记录。");
+
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    const record = db.prepare("SELECT * FROM usage_records WHERE id = ?").get(id) as UsageRow | undefined;
+    if (!record) throw new Error("所选领用记录不存在，请刷新页面后重试。");
+    if (record.status !== "issued") {
+      db.exec("COMMIT;");
+      return getInventoryState();
+    }
+
+    const batch = db.prepare("SELECT * FROM materials WHERE id = ?").get(record.material_batch_id) as
+      | MaterialRow
+      | undefined;
+    if (!batch) throw new Error("所选批次不存在，请刷新页面后重试。");
+
+    const now = new Date().toISOString();
+    db.prepare("UPDATE materials SET remaining_quantity = remaining_quantity + ?, updated_at = ? WHERE id = ?").run(
+      record.used_quantity,
+      now,
+      batch.id,
+    );
+    db.prepare(`
+      UPDATE usage_records
+      SET status = 'pending', issued_at = '', issued_by_user_id = '', issued_by_username = ''
+      WHERE id = ?
+    `).run(id);
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+
+  return getInventoryState();
+}
+
+export function deleteUsageRecord(usageRecordId: string, actor: CurrentUser): InventoryState {
+  const db = getDatabase();
+  const id = requiredText(usageRecordId);
+  if (!id) throw new Error("缺少要删除的领用记录。");
+
+  const record = db.prepare("SELECT * FROM usage_records WHERE id = ?").get(id) as UsageRow | undefined;
+  if (!record) throw new Error("所选领用记录不存在，请刷新页面后重试。");
+  if (record.status === "issued") throw new Error("已出库记录不能删除。");
+  const canDeleteAnyUsage = can(actor.role, "usage:process");
+  if (!canDeleteAnyUsage && record.submitted_by_user_id !== actor.id) {
+    throw new Error("只能删除自己提交且尚未出库的领用记录。");
+  }
+
+  db.prepare("DELETE FROM usage_records WHERE id = ?").run(id);
   return getInventoryState();
 }
 

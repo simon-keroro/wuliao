@@ -13,9 +13,19 @@ import type {
 import { ROLE_LABELS, type Permission, type UserRole } from "@/lib/permissions";
 import { APP_DISPLAY_TITLE } from "@/lib/version";
 
-type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList" | "users" | "auditLogs";
+type Tab =
+  | "inventory"
+  | "intake"
+  | "usage"
+  | "outbound"
+  | "records"
+  | "warehouseRequest"
+  | "reservationList"
+  | "users"
+  | "auditLogs";
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
+type UsageStatusFilter = "all" | "pending" | "issued";
 type BackupResponse = {
   ok: boolean;
   sent: boolean;
@@ -192,6 +202,11 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
+  const [outboundSapQuery, setOutboundSapQuery] = useState("");
+  const [outboundMaterialQuery, setOutboundMaterialQuery] = useState("");
+  const [outboundUserFilter, setOutboundUserFilter] = useState("all");
+  const [outboundPurposeFilter, setOutboundPurposeFilter] = useState("all");
+  const [outboundStatusFilter, setOutboundStatusFilter] = useState<UsageStatusFilter>("all");
   const [message, setMessage] = useState("");
 
   const applyState = useCallback((state: InventoryState) => {
@@ -244,6 +259,7 @@ export default function Home() {
   const canWriteInventory = hasPermission("inventory:write");
   const canDeleteInventory = hasPermission("inventory:delete");
   const canCreateUsage = hasPermission("usage:create");
+  const canProcessUsage = hasPermission("usage:process");
   const canCreateReservation = hasPermission("reservation:create");
   const canProcessReservation = hasPermission("reservation:process");
   const canDeleteReservation = hasPermission("reservation:delete");
@@ -257,6 +273,7 @@ export default function Home() {
     (activeTab === "auditLogs" && canReadAuditLogs) ||
     (activeTab === "intake" && canWriteInventory) ||
     (activeTab === "usage" && canCreateUsage) ||
+    (activeTab === "outbound" && (canCreateUsage || canProcessUsage)) ||
     (activeTab === "warehouseRequest" && canCreateReservation) ||
     (activeTab === "users" && canManageUsers)
       ? activeTab
@@ -288,9 +305,13 @@ export default function Home() {
     });
   }, [materials, query, expiryFilter, stockFilter]);
 
+  const issuedUsageRecords = useMemo(() => {
+    return usageRecords.filter((record) => record.status === "issued");
+  }, [usageRecords]);
+
   const filteredUsage = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return usageRecords.filter((record) =>
+    return issuedUsageRecords.filter((record) =>
       !keyword
         ? true
         : [record.sapNo, record.materialName, record.batchNo, record.userName, record.purpose]
@@ -298,7 +319,47 @@ export default function Home() {
             .toLowerCase()
             .includes(keyword),
     );
-  }, [usageRecords, query]);
+  }, [issuedUsageRecords, query]);
+
+  const outboundUserOptions = useMemo(() => {
+    return Array.from(new Set(usageRecords.map((record) => record.userName).filter(Boolean))).sort((left, right) =>
+      left.localeCompare(right, "zh-CN"),
+    );
+  }, [usageRecords]);
+
+  const outboundPurposeOptions = useMemo(() => {
+    return Array.from(new Set(usageRecords.map((record) => record.purpose).filter(Boolean))).sort((left, right) =>
+      left.localeCompare(right, "zh-CN"),
+    );
+  }, [usageRecords]);
+
+  const filteredOutboundRecords = useMemo(() => {
+    const sapKeyword = outboundSapQuery.trim().toLowerCase();
+    const materialKeyword = outboundMaterialQuery.trim().toLowerCase();
+    return usageRecords.filter((record) => {
+      const matchesSap = !sapKeyword || record.sapNo.toLowerCase().includes(sapKeyword);
+      const matchesMaterial = !materialKeyword || record.materialName.toLowerCase().includes(materialKeyword);
+      const matchesUser = outboundUserFilter === "all" || record.userName === outboundUserFilter;
+      const matchesPurpose = outboundPurposeFilter === "all" || record.purpose === outboundPurposeFilter;
+      const matchesStatus = outboundStatusFilter === "all" || record.status === outboundStatusFilter;
+      return matchesSap && matchesMaterial && matchesUser && matchesPurpose && matchesStatus;
+    });
+  }, [
+    outboundMaterialQuery,
+    outboundPurposeFilter,
+    outboundSapQuery,
+    outboundStatusFilter,
+    outboundUserFilter,
+    usageRecords,
+  ]);
+
+  function resetOutboundFilters() {
+    setOutboundSapQuery("");
+    setOutboundMaterialQuery("");
+    setOutboundUserFilter("all");
+    setOutboundPurposeFilter("all");
+    setOutboundStatusFilter("all");
+  }
 
   const filteredReservations = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -530,10 +591,48 @@ export default function Home() {
       });
       applyState(state);
       setUsageForm({ ...emptyUsage, usedDate: getTodayDate() });
-      setMessage("领用登记成功，剩余库存已同步扣减。");
-      setActiveTab("inventory");
+      setMessage("领用登记已提交，已进入出库管理待处理。");
+      setActiveTab("outbound");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "领用登记失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleToggleUsageIssue(record: UsageRecord) {
+    const isIssued = record.status === "issued";
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>("/api/usage-records", {
+        method: "PATCH",
+        body: JSON.stringify({ id: record.id, action: isIssued ? "undoIssue" : "issue" }),
+      });
+      applyState(state);
+      setMessage(
+        isIssued
+          ? `${record.materialName} 已撤销出库，库存已回退。`
+          : `${record.materialName} 已出库，库存总览已同步扣减。`,
+      );
+      setActiveTab("outbound");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : isIssued ? "撤销出库失败。" : "出库失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleDeleteUsage(record: UsageRecord) {
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>(`/api/usage-records?id=${encodeURIComponent(record.id)}`, {
+        method: "DELETE",
+      });
+      applyState(state);
+      setMessage(`${record.materialName} 的待出库记录已删除。`);
+      setActiveTab("outbound");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除领用记录失败。");
     } finally {
       setIsSubmitting(false);
     }
@@ -731,7 +830,7 @@ export default function Home() {
               {isBackingUp ? "正在备份" : "备份数据库"}
             </button>
           ) : null}
-          <button className="secondary" onClick={() => exportCsv("领用记录.csv", usageRecords.map(formatUsageExport))}>
+          <button className="secondary" onClick={() => exportCsv("领用记录.csv", issuedUsageRecords.map(formatUsageExport))}>
             导出流水
           </button>
           <button className="secondary" onClick={loadState} disabled={isSubmitting || isLoading}>
@@ -760,6 +859,9 @@ export default function Home() {
         ) : null}
         {canCreateUsage ? (
           <TabButton active={activeView === "usage"} onClick={() => setActiveTab("usage")}>领用登记</TabButton>
+        ) : null}
+        {canCreateUsage || canProcessUsage ? (
+          <TabButton active={activeView === "outbound"} onClick={() => setActiveTab("outbound")}>出库管理</TabButton>
         ) : null}
         <TabButton active={activeView === "records"} onClick={() => setActiveTab("records")}>流水记录</TabButton>
         {canCreateReservation ? (
@@ -921,11 +1023,78 @@ export default function Home() {
               </div>
             ) : null}
             <div className="form-actions">
-              <button className="primary" type="submit" disabled={isSubmitting}>提交领用并扣减库存</button>
+              <button className="primary" type="submit" disabled={isSubmitting}>提交领用登记</button>
             </div>
           </form>
         </section>
       )}
+
+      {activeView === "outbound" && (canCreateUsage || canProcessUsage) ? (
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <h2>出库管理</h2>
+              <p>领用登记先进入待出库清单，库管员确认后再扣减库存。</p>
+            </div>
+            <button className="secondary" onClick={resetOutboundFilters}>清空筛选</button>
+          </div>
+          <div className="outbound-filters">
+            <label>
+              SAP号
+              <input
+                value={outboundSapQuery}
+                onChange={(event) => setOutboundSapQuery(event.target.value)}
+                placeholder="输入部分SAP号"
+              />
+            </label>
+            <label>
+              物料名称
+              <input
+                value={outboundMaterialQuery}
+                onChange={(event) => setOutboundMaterialQuery(event.target.value)}
+                placeholder="输入部分物料名称"
+              />
+            </label>
+            <label>
+              领用人
+              <select value={outboundUserFilter} onChange={(event) => setOutboundUserFilter(event.target.value)}>
+                <option value="all">全部领用人</option>
+                {outboundUserOptions.map((userName) => (
+                  <option key={userName} value={userName}>{userName}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              用途 / 项目
+              <select value={outboundPurposeFilter} onChange={(event) => setOutboundPurposeFilter(event.target.value)}>
+                <option value="all">全部用途</option>
+                {outboundPurposeOptions.map((purpose) => (
+                  <option key={purpose} value={purpose}>{purpose}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              状态
+              <select
+                value={outboundStatusFilter}
+                onChange={(event) => setOutboundStatusFilter(event.target.value as UsageStatusFilter)}
+              >
+                <option value="all">全部状态</option>
+                <option value="pending">待出库</option>
+                <option value="issued">已出库</option>
+              </select>
+            </label>
+          </div>
+          <OutboundTable
+            records={filteredOutboundRecords}
+            currentUserId={currentUser?.id ?? ""}
+            canProcess={canProcessUsage}
+            onToggleIssue={handleToggleUsageIssue}
+            onDelete={handleDeleteUsage}
+            isSubmitting={isSubmitting}
+          />
+        </section>
+      ) : null}
 
       {activeView === "warehouseRequest" && canCreateReservation && (
         <section className="panel">
@@ -976,7 +1145,7 @@ export default function Home() {
         <section className="panel">
           <div className="panel-heading">
             <h2>领用流水</h2>
-            <button className="secondary" onClick={() => exportCsv("领用记录.csv", usageRecords.map(formatUsageExport))}>导出流水</button>
+            <button className="secondary" onClick={() => exportCsv("领用记录.csv", filteredUsage.map(formatUsageExport))}>导出流水</button>
           </div>
           <RecordsTable records={filteredUsage} />
         </section>
@@ -1381,6 +1550,95 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
   );
 }
 
+function getUsageStatusLabel(status: UsageRecord["status"]) {
+  return status === "issued" ? "已出库" : "待出库";
+}
+
+function OutboundTable({
+  records,
+  currentUserId,
+  canProcess,
+  onToggleIssue,
+  onDelete,
+  isSubmitting,
+}: {
+  records: UsageRecord[];
+  currentUserId: string;
+  canProcess: boolean;
+  onToggleIssue: (record: UsageRecord) => void;
+  onDelete: (record: UsageRecord) => void;
+  isSubmitting: boolean;
+}) {
+  return (
+    <div className="table-wrap outbound-table">
+      <table>
+        <thead>
+          <tr>
+            <th>SAP号</th>
+            <th>物料名称</th>
+            <th>领用人</th>
+            <th>领用量</th>
+            <th>领用日期</th>
+            <th>用途 / 项目</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {records.map((record) => {
+            const isIssued = record.status === "issued";
+            const canDeleteOwnPending = !isIssued && record.submittedByUserId === currentUserId;
+            const canShowDelete = canProcess || canDeleteOwnPending;
+            return (
+              <tr key={record.id}>
+                <td><strong>{record.sapNo || "-"}</strong></td>
+                <td>
+                  <strong>{record.materialName}</strong>
+                  <small>批号 {record.batchNo || "-"}</small>
+                </td>
+                <td>{record.userName}</td>
+                <td>{record.usedQuantity}</td>
+                <td>{record.usedDate}</td>
+                <td>{record.purpose || "-"}</td>
+                <td>
+                  <Badge tone={isIssued ? "success" : "warning"}>{getUsageStatusLabel(record.status)}</Badge>
+                  <small>{isIssued && record.issuedAt ? record.issuedAt.slice(0, 10) : "等待库管确认"}</small>
+                </td>
+                <td>
+                  <div className="table-actions">
+                    {canProcess ? (
+                      <button
+                        className={`table-action ${isIssued ? "table-action-muted" : ""}`}
+                        type="button"
+                        onClick={() => onToggleIssue(record)}
+                        disabled={isSubmitting}
+                      >
+                        {isIssued ? "已出库" : "出库"}
+                      </button>
+                    ) : null}
+                    {canShowDelete ? (
+                      <button
+                        className="table-action table-action-danger"
+                        type="button"
+                        onClick={() => onDelete(record)}
+                        disabled={isSubmitting || isIssued}
+                      >
+                        删除
+                      </button>
+                    ) : null}
+                  </div>
+                  <small>{record.submittedByUsername ? `提交账号 ${record.submittedByUsername}` : ""}</small>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {records.length === 0 ? <p className="empty">暂无匹配的出库记录。</p> : null}
+    </div>
+  );
+}
+
 const ACTION_LABELS: Record<string, string> = {
   "auth.login": "登录系统",
   "auth.logout": "退出系统",
@@ -1388,6 +1646,9 @@ const ACTION_LABELS: Record<string, string> = {
   "material.update": "编辑物料",
   "material.delete": "删除物料",
   "usage.create": "领用登记",
+  "usage.issue": "确认出库",
+  "usage.undoIssue": "撤销出库",
+  "usage.delete": "删除领用登记",
   "reservation.create": "提交预约",
   "reservation.receive": "入研发库",
   "reservation.undoReceive": "撤销入研发库",
@@ -1638,6 +1899,8 @@ function formatUsageExport(record: UsageRecord) {
     领用日期: record.usedDate,
     领用量: record.usedQuantity,
     用途项目: record.purpose,
+    状态: getUsageStatusLabel(record.status),
+    出库时间: record.issuedAt,
     备注: record.notes,
     创建时间: record.createdAt,
   };

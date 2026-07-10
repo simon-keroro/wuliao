@@ -47,14 +47,20 @@ page instead of editing `.env`.
 User roles:
 
 - `系统管理员`: manage users, view operation logs, run manual backups, reset demo data, and perform all material workflows.
-- `物料管理员`: manage inventory, usage records, reservations, and reservation receipt status.
-- `普通用户`: create usage records and warehouse reservations, and view inventory data.
+- `物料管理员`: manage inventory, outbound processing, reservations, and reservation receipt status.
+- `普通用户`: create usage requests and warehouse reservations, delete their own pending outbound requests, and view inventory data.
 - `只读用户`: view inventory, records, and reservation lists only.
 
 All signed-in users can change their own password from the top action bar.
 Operation logs record sign-in, sign-out, password changes, user management,
 inventory, usage, reservation, backup, and other key actions. Only system
 administrators can view operation logs in the app.
+
+Usage registration now creates a pending outbound record first. Inventory is
+deducted only after a material manager confirms `出库` in the `出库管理` page.
+Managers can click `已出库` again to undo the outbound action and restore the
+stock quantity. Pending outbound records can be deleted by the submitter or by a
+material manager; issued records cannot be deleted.
 
 ## Weekly Database Backup
 

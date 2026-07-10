@@ -68,6 +68,8 @@ export type MaterialBatch = {
   updatedAt: string;
 };
 
+export type UsageStatus = "pending" | "issued";
+
 export type UsageRecord = {
   id: string;
   materialBatchId: string;
@@ -79,6 +81,12 @@ export type UsageRecord = {
   usedQuantity: number;
   purpose: string;
   notes: string;
+  status: UsageStatus;
+  submittedByUserId: string;
+  submittedByUsername: string;
+  issuedAt: string;
+  issuedByUserId: string;
+  issuedByUsername: string;
   createdAt: string;
 };
 
@@ -211,6 +219,12 @@ export const initialUsage: UsageRecord[] = [
     usedQuantity: 4,
     purpose: "样品清洗",
     notes: "常规实验",
+    status: "issued",
+    submittedByUserId: "demo-user-wang",
+    submittedByUsername: "王珂",
+    issuedAt: "2026-06-18T09:00:00.000Z",
+    issuedByUserId: "demo-manager",
+    issuedByUsername: "演示库管员",
     createdAt: "2026-06-18T09:00:00.000Z",
   },
   {
@@ -224,6 +238,12 @@ export const initialUsage: UsageRecord[] = [
     usedQuantity: 34,
     purpose: "细胞培养",
     notes: "周消耗",
+    status: "issued",
+    submittedByUserId: "demo-user-li",
+    submittedByUsername: "李研",
+    issuedAt: "2026-06-12T09:00:00.000Z",
+    issuedByUserId: "demo-manager",
+    issuedByUsername: "演示库管员",
     createdAt: "2026-06-12T09:00:00.000Z",
   },
 ];

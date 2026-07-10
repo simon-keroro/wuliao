@@ -12,6 +12,7 @@ export type Permission =
   | "inventory:write"
   | "inventory:delete"
   | "usage:create"
+  | "usage:process"
   | "reservation:create"
   | "reservation:process"
   | "reservation:delete"
@@ -26,6 +27,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "inventory:write",
     "inventory:delete",
     "usage:create",
+    "usage:process",
     "reservation:create",
     "reservation:process",
     "reservation:delete",
@@ -39,6 +41,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "inventory:write",
     "inventory:delete",
     "usage:create",
+    "usage:process",
     "reservation:create",
     "reservation:process",
     "reservation:delete",
