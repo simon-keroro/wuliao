@@ -187,6 +187,7 @@ export default function Home() {
   const [passwordResetUser, setPasswordResetUser] = useState<PublicUser | null>(null);
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [usageMaterialQuery, setUsageMaterialQuery] = useState("");
+  const [isUsageMaterialPickerOpen, setIsUsageMaterialPickerOpen] = useState(false);
   const [reservationForm, setReservationForm] = useState(() => ({ ...emptyReservation, expectedDate: getTodayDate() }));
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -602,6 +603,7 @@ export default function Home() {
   function selectUsageMaterial(batch: MaterialBatch) {
     setUsageForm({ ...usageForm, materialBatchId: batch.id });
     setUsageMaterialQuery(`${batch.sapNo || "-"} / ${batch.name}`);
+    setIsUsageMaterialPickerOpen(false);
   }
 
   function adjustUsageQuantity(delta: number) {
@@ -1020,34 +1022,42 @@ export default function Home() {
             <p>可领用批次按近效期优先排序。</p>
           </div>
           <form className="form-grid" onSubmit={handleUsageSubmit}>
-            <label className="wide">
+            <label className="wide material-field">
               物料
               <input
                 value={usageMaterialQuery}
+                onFocus={() => setIsUsageMaterialPickerOpen(true)}
+                onBlur={() => {
+                  window.setTimeout(() => setIsUsageMaterialPickerOpen(false), 120);
+                }}
                 onChange={(event) => {
                   setUsageMaterialQuery(event.target.value);
                   setUsageForm({ ...usageForm, materialBatchId: "" });
+                  setIsUsageMaterialPickerOpen(true);
                 }}
                 placeholder="输入物料名称或SAP号筛选"
                 required={!usageForm.materialBatchId}
               />
-              <div className="material-picker">
-                {usageMaterialMatches.map((batch) => {
-                  const isSelected = batch.id === usageForm.materialBatchId;
-                  return (
-                    <button
-                      className={`material-option ${isSelected ? "selected" : ""}`}
-                      key={batch.id}
-                      type="button"
-                      onClick={() => selectUsageMaterial(batch)}
-                    >
-                      <strong>{batch.name}</strong>
-                      <span>{batch.sapNo || "-"} / {batch.batchNo || "-"} / 剩余 {batch.remainingQuantity} {batch.unit}</span>
-                    </button>
-                  );
-                })}
-                {usageMaterialMatches.length === 0 ? <p className="empty compact-empty">没有匹配的可领用物料。</p> : null}
-              </div>
+              {isUsageMaterialPickerOpen ? (
+                <div className="material-picker">
+                  {usageMaterialMatches.map((batch) => {
+                    const isSelected = batch.id === usageForm.materialBatchId;
+                    return (
+                      <button
+                        className={`material-option ${isSelected ? "selected" : ""}`}
+                        key={batch.id}
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => selectUsageMaterial(batch)}
+                      >
+                        <strong>{batch.name}</strong>
+                        <span>{batch.sapNo || "-"} / {batch.batchNo || "-"} / 剩余 {batch.remainingQuantity} {batch.unit}</span>
+                      </button>
+                    );
+                  })}
+                  {usageMaterialMatches.length === 0 ? <p className="empty compact-empty">没有匹配的可领用物料。</p> : null}
+                </div>
+              ) : null}
             </label>
             <TextInput label="领用人" value={usageForm.userName} onChange={(userName) => setUsageForm({ ...usageForm, userName })} required />
             <TextInput label="领用日期" type="date" value={usageForm.usedDate} onChange={(usedDate) => setUsageForm({ ...usageForm, usedDate })} required />
@@ -1106,7 +1116,7 @@ export default function Home() {
               <input
                 value={outboundSapQuery}
                 onChange={(event) => setOutboundSapQuery(event.target.value)}
-                placeholder="输入部分SAP号"
+                placeholder="输入SAP号"
               />
             </label>
             <label>
@@ -1114,7 +1124,7 @@ export default function Home() {
               <input
                 value={outboundMaterialQuery}
                 onChange={(event) => setOutboundMaterialQuery(event.target.value)}
-                placeholder="输入部分物料名称"
+                placeholder="输入物料名称"
               />
             </label>
             <label>
@@ -1510,7 +1520,6 @@ function QuantityInput({
     <label>
       {label}
       <div className="quantity-control">
-        <button type="button" onClick={() => onStep(-1)} aria-label="减少领用量">-</button>
         <input
           type="number"
           value={value}
@@ -1519,7 +1528,10 @@ function QuantityInput({
           min="0"
           step="0.01"
         />
-        <button type="button" onClick={() => onStep(1)} aria-label="增加领用量">+</button>
+        <div className="quantity-buttons">
+          <button type="button" onClick={() => onStep(-1)} aria-label="减少领用量">-</button>
+          <button type="button" onClick={() => onStep(1)} aria-label="增加领用量">+</button>
+        </div>
       </div>
     </label>
   );

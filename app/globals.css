@@ -366,16 +366,31 @@ textarea:focus {
   color: var(--muted);
 }
 
+.material-field {
+  position: relative;
+}
+
 .material-picker {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 12;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  width: 100%;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  padding: 8px;
+  gap: 6px;
 }
 
 .material-option {
-  min-height: 58px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  min-height: 54px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   background: #ffffff;
   color: var(--foreground);
   padding: 9px 11px;
@@ -401,11 +416,17 @@ textarea:focus {
 
 .quantity-control {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  grid-template-columns: minmax(0, 1fr) 92px;
   gap: 8px;
 }
 
-.quantity-control button {
+.quantity-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quantity-buttons button {
   min-height: 42px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -415,7 +436,7 @@ textarea:focus {
   font-weight: 900;
 }
 
-.quantity-control button:hover {
+.quantity-buttons button:hover {
   border-color: var(--primary);
 }
 
