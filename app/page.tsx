@@ -186,6 +186,7 @@ export default function Home() {
   const [materialToDelete, setMaterialToDelete] = useState<MaterialBatch | null>(null);
   const [passwordResetUser, setPasswordResetUser] = useState<PublicUser | null>(null);
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
+  const [usageMaterialQuery, setUsageMaterialQuery] = useState("");
   const [reservationForm, setReservationForm] = useState(() => ({ ...emptyReservation, expectedDate: getTodayDate() }));
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -221,6 +222,7 @@ export default function Home() {
       const [state, me] = await Promise.all([requestJson<InventoryState>("/api/state"), requestJson<MeResponse>("/api/me")]);
       applyState(state);
       setCurrentUser(me.user);
+      setUsageForm((form) => (form.userName ? form : { ...form, userName: me.user.displayName }));
       setIsAuthenticated(true);
       setMessage("");
     } catch (error) {
@@ -251,6 +253,18 @@ export default function Home() {
   );
 
   const selectedBatch = materials.find((batch) => batch.id === usageForm.materialBatchId);
+  const usageMaterialMatches = useMemo(() => {
+    const keyword = usageMaterialQuery.trim().toLowerCase();
+    return usableMaterials
+      .filter((batch) => {
+        if (!keyword) return true;
+        return [batch.sapNo, batch.name, batch.batchNo, batch.category]
+          .join(" ")
+          .toLowerCase()
+          .includes(keyword);
+      })
+      .slice(0, 8);
+  }, [usableMaterials, usageMaterialQuery]);
   const isEditingMaterial = Boolean(editingMaterialId);
   const hasPermission = useCallback(
     (permission: Permission) => Boolean(currentUser?.permissions.includes(permission)),
@@ -374,7 +388,11 @@ export default function Home() {
   }, [reservationRecords, query]);
 
   const auditUserOptions = useMemo(() => {
-    return Array.from(new Set(auditLogs.map((log) => log.username).filter(Boolean))).sort();
+    const options = new Map<string, string>();
+    for (const log of auditLogs) {
+      if (log.username) options.set(log.username, log.displayName || log.username);
+    }
+    return Array.from(options.entries()).sort((left, right) => left[0].localeCompare(right[0], "zh-CN"));
   }, [auditLogs]);
 
   const auditActionOptions = useMemo(() => {
@@ -581,6 +599,17 @@ export default function Home() {
     setActiveTab("inventory");
   }
 
+  function selectUsageMaterial(batch: MaterialBatch) {
+    setUsageForm({ ...usageForm, materialBatchId: batch.id });
+    setUsageMaterialQuery(`${batch.sapNo || "-"} / ${batch.name}`);
+  }
+
+  function adjustUsageQuantity(delta: number) {
+    const current = Number(usageForm.usedQuantity || 0);
+    const next = Math.max(0, (Number.isFinite(current) ? current : 0) + delta);
+    setUsageForm({ ...usageForm, usedQuantity: String(next) });
+  }
+
   async function handleUsageSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
@@ -590,7 +619,8 @@ export default function Home() {
         body: JSON.stringify(usageForm),
       });
       applyState(state);
-      setUsageForm({ ...emptyUsage, usedDate: getTodayDate() });
+      setUsageForm({ ...emptyUsage, userName: currentUser?.displayName ?? "", usedDate: getTodayDate() });
+      setUsageMaterialQuery("");
       setMessage("领用登记已提交，已进入出库管理待处理。");
       setActiveTab("outbound");
     } catch (error) {
@@ -991,24 +1021,56 @@ export default function Home() {
           </div>
           <form className="form-grid" onSubmit={handleUsageSubmit}>
             <label className="wide">
-              物料批次
-              <select
-                value={usageForm.materialBatchId}
-                onChange={(event) => setUsageForm({ ...usageForm, materialBatchId: event.target.value })}
-                required
-              >
-                <option value="">请选择可领用批次</option>
-                {usableMaterials.map((batch) => (
-                  <option key={batch.id} value={batch.id}>
-                    {batch.sapNo} / {batch.name} / {batch.batchNo} / 剩余 {batch.remainingQuantity} {batch.unit} / 有效期 {batch.expiryDate}
-                  </option>
-                ))}
-              </select>
+              物料
+              <input
+                value={usageMaterialQuery}
+                onChange={(event) => {
+                  setUsageMaterialQuery(event.target.value);
+                  setUsageForm({ ...usageForm, materialBatchId: "" });
+                }}
+                placeholder="输入物料名称或SAP号筛选"
+                required={!usageForm.materialBatchId}
+              />
+              <div className="material-picker">
+                {usageMaterialMatches.map((batch) => {
+                  const isSelected = batch.id === usageForm.materialBatchId;
+                  return (
+                    <button
+                      className={`material-option ${isSelected ? "selected" : ""}`}
+                      key={batch.id}
+                      type="button"
+                      onClick={() => selectUsageMaterial(batch)}
+                    >
+                      <strong>{batch.name}</strong>
+                      <span>{batch.sapNo || "-"} / {batch.batchNo || "-"} / 剩余 {batch.remainingQuantity} {batch.unit}</span>
+                    </button>
+                  );
+                })}
+                {usageMaterialMatches.length === 0 ? <p className="empty compact-empty">没有匹配的可领用物料。</p> : null}
+              </div>
             </label>
             <TextInput label="领用人" value={usageForm.userName} onChange={(userName) => setUsageForm({ ...usageForm, userName })} required />
             <TextInput label="领用日期" type="date" value={usageForm.usedDate} onChange={(usedDate) => setUsageForm({ ...usageForm, usedDate })} required />
-            <TextInput label="领用量" type="number" value={usageForm.usedQuantity} onChange={(usedQuantity) => setUsageForm({ ...usageForm, usedQuantity })} required min="0" step="0.01" />
-            <TextInput label="用途 / 项目" value={usageForm.purpose} onChange={(purpose) => setUsageForm({ ...usageForm, purpose })} placeholder="项目编号或实验用途" />
+            <QuantityInput
+              label="领用量"
+              value={usageForm.usedQuantity}
+              onChange={(usedQuantity) => setUsageForm({ ...usageForm, usedQuantity })}
+              onStep={adjustUsageQuantity}
+            />
+            <label>
+              用途 / 项目
+              <input
+                list="usage-purpose-options"
+                value={usageForm.purpose}
+                onChange={(event) => setUsageForm({ ...usageForm, purpose: event.target.value })}
+                placeholder="选择已有用途或手动输入"
+              />
+              <datalist id="usage-purpose-options">
+                {outboundPurposeOptions.map((purpose) => (
+                  <option key={purpose} value={purpose} />
+                ))}
+              </datalist>
+            </label>
             <label className="wide">
               备注
               <textarea value={usageForm.notes} onChange={(event) => setUsageForm({ ...usageForm, notes: event.target.value })} />
@@ -1173,8 +1235,8 @@ export default function Home() {
               用户
               <select value={auditUserFilter} onChange={(event) => setAuditUserFilter(event.target.value)}>
                 <option value="all">全部用户</option>
-                {auditUserOptions.map((username) => (
-                  <option key={username} value={username}>{username}</option>
+                {auditUserOptions.map(([username, displayName]) => (
+                  <option key={username} value={username}>{username} / {displayName}</option>
                 ))}
               </select>
             </label>
@@ -1433,6 +1495,36 @@ function TextInput({
   );
 }
 
+function QuantityInput({
+  label,
+  value,
+  onChange,
+  onStep,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  onStep: (delta: number) => void;
+}) {
+  return (
+    <label>
+      {label}
+      <div className="quantity-control">
+        <button type="button" onClick={() => onStep(-1)} aria-label="减少领用量">-</button>
+        <input
+          type="number"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          required
+          min="0"
+          step="0.01"
+        />
+        <button type="button" onClick={() => onStep(1)} aria-label="增加领用量">+</button>
+      </div>
+    </label>
+  );
+}
+
 function InventoryTable({
   materials,
   onEdit,
@@ -1538,7 +1630,7 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
               <td><strong>{record.materialName}</strong></td>
               <td>{record.batchNo}</td>
               <td>{record.userName}</td>
-              <td>{record.usedQuantity}</td>
+              <td>{record.usedQuantity} {record.unit || ""}</td>
               <td>{record.purpose || "-"}</td>
               <td>{record.notes || "-"}</td>
             </tr>
@@ -1597,7 +1689,7 @@ function OutboundTable({
                   <small>批号 {record.batchNo || "-"}</small>
                 </td>
                 <td>{record.userName}</td>
-                <td>{record.usedQuantity}</td>
+                <td>{record.usedQuantity} {record.unit || ""}</td>
                 <td>{record.usedDate}</td>
                 <td>{record.purpose || "-"}</td>
                 <td>
@@ -1627,7 +1719,13 @@ function OutboundTable({
                       </button>
                     ) : null}
                   </div>
-                  <small>{record.submittedByUsername ? `提交账号 ${record.submittedByUsername}` : ""}</small>
+                  <small>
+                    {isIssued
+                      ? `库管员 ${record.issuedByDisplayName || record.issuedByUsername || "-"}`
+                      : record.submittedByDisplayName
+                        ? `提交人 ${record.submittedByDisplayName}`
+                        : ""}
+                  </small>
                 </td>
               </tr>
             );
@@ -1662,16 +1760,77 @@ const ACTION_LABELS: Record<string, string> = {
   "demo.reset": "恢复演示数据",
 };
 
-function formatAuditDetails(details: string) {
-  if (!details || details === "{}") return "-";
+function parseAuditDetails(details: string) {
   try {
-    const parsed = JSON.parse(details) as Record<string, unknown>;
-    const entries = Object.entries(parsed).filter(([, value]) => value !== "" && value !== undefined && value !== null);
-    if (entries.length === 0) return "-";
-    return entries.map(([key, value]) => `${key}: ${String(value)}`).join("；");
+    return JSON.parse(details || "{}") as Record<string, unknown>;
   } catch {
-    return details;
+    return {};
   }
+}
+
+function detailText(details: Record<string, unknown>, key: string) {
+  const value = details[key];
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function formatUserLabel(log: AuditLog) {
+  return log.displayName && log.displayName !== log.username ? `${log.username} / ${log.displayName}` : log.username;
+}
+
+function formatAuditDetails(log: AuditLog) {
+  const details = parseAuditDetails(log.details);
+  const userName = detailText(details, "userName") || log.displayName || log.username;
+  const materialName = detailText(details, "materialName");
+  const quantity = detailText(details, "quantity");
+  const unit = detailText(details, "unit") || "个";
+  const purpose = detailText(details, "purpose");
+  const sapNo = detailText(details, "sapNo");
+
+  if (log.action === "usage.create" && materialName) {
+    return `${userName} 领用 ${materialName} 物料 ${quantity || "-"} ${unit}${purpose ? `，用途/项目：${purpose}` : ""}。`;
+  }
+  if (log.action === "usage.issue" && materialName) {
+    return `${log.displayName || log.username} 确认 ${userName} 的 ${materialName} 物料出库 ${quantity || "-"} ${unit}。`;
+  }
+  if (log.action === "usage.undoIssue" && materialName) {
+    return `${log.displayName || log.username} 撤销 ${materialName} 物料出库。`;
+  }
+  if (log.action === "usage.delete" && materialName) {
+    return `${log.displayName || log.username} 删除 ${userName} 的 ${materialName} 待出库记录。`;
+  }
+  if (log.action === "material.create") {
+    return `${log.displayName || log.username} 新增入库 ${log.target || detailText(details, "name") || "物料"}${sapNo ? `，SAP号 ${sapNo}` : ""}。`;
+  }
+  if (log.action === "material.update") {
+    return `${log.displayName || log.username} 编辑 ${detailText(details, "name") || log.target || "物料"} 的信息。`;
+  }
+  if (log.action === "material.delete") {
+    return `${log.displayName || log.username} 删除了一条库存物料记录。`;
+  }
+  if (log.action === "reservation.create") {
+    return `${detailText(details, "requester") || log.displayName || log.username} 提交 ${log.target || "物料"} 仓储领料预约。`;
+  }
+  if (log.action === "reservation.receive") {
+    return `${log.displayName || log.username} 确认一条预约已入研发库。`;
+  }
+  if (log.action === "reservation.undoReceive") {
+    return `${log.displayName || log.username} 撤销一条预约入研发库。`;
+  }
+  if (log.action === "reservation.delete") {
+    return `${log.displayName || log.username} 删除一条预约记录。`;
+  }
+  if (log.action === "auth.login") return `${log.displayName || log.username} 登录系统。`;
+  if (log.action === "auth.logout") return `${log.displayName || log.username} 退出系统。`;
+  if (log.action === "backup.run") return `${log.displayName || log.username} 执行数据库备份。`;
+  if (log.action === "audit.view") return `${log.displayName || log.username} 查看操作日志。`;
+  if (log.action === "user.password.change") return `${log.displayName || log.username} 修改自己的密码。`;
+  if (log.action === "user.password.reset") return `${log.displayName || log.username} 重置 ${log.target || "用户"} 的密码。`;
+  if (log.action === "user.create") return `${log.displayName || log.username} 新增用户 ${log.target || ""}。`;
+  if (log.action === "user.update") return `${log.displayName || log.username} 更新用户 ${log.target || ""}。`;
+
+  const entries = Object.entries(details).filter(([, value]) => value !== "" && value !== undefined && value !== null);
+  if (entries.length === 0) return "-";
+  return entries.map(([key, value]) => `${key}: ${String(value)}`).join("；");
 }
 
 function AuditLogsTable({ logs, showUser }: { logs: AuditLog[]; showUser: boolean }) {
@@ -1683,7 +1842,6 @@ function AuditLogsTable({ logs, showUser }: { logs: AuditLog[]; showUser: boolea
             <th>时间</th>
             {showUser ? <th>用户</th> : null}
             <th>操作</th>
-            <th>对象</th>
             <th>详情</th>
           </tr>
         </thead>
@@ -1691,10 +1849,9 @@ function AuditLogsTable({ logs, showUser }: { logs: AuditLog[]; showUser: boolea
           {logs.map((log) => (
             <tr key={log.id}>
               <td>{log.createdAt.replace("T", " ").slice(0, 19)}</td>
-              {showUser ? <td><strong>{log.username}</strong></td> : null}
+              {showUser ? <td><strong>{formatUserLabel(log)}</strong></td> : null}
               <td>{ACTION_LABELS[log.action] ?? log.action}</td>
-              <td>{log.target || "-"}</td>
-              <td>{formatAuditDetails(log.details)}</td>
+              <td>{formatAuditDetails(log)}</td>
             </tr>
           ))}
         </tbody>

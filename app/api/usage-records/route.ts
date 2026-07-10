@@ -10,18 +10,35 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function usageAuditDetails(record: {
+  userName: string;
+  materialName: string;
+  usedQuantity: number;
+  unit: string;
+  purpose: string;
+  sapNo: string;
+  batchNo: string;
+}) {
+  return {
+    userName: record.userName,
+    materialName: record.materialName,
+    quantity: record.usedQuantity,
+    unit: record.unit || "个",
+    purpose: record.purpose,
+    sapNo: record.sapNo,
+    batchNo: record.batchNo,
+  };
+}
+
 export async function POST(request: Request) {
   const user = requirePermission(request, "usage:create");
   if (user instanceof Response) return user;
 
   try {
     const payload = (await request.json()) as UsageInput;
-    const state = createUsageRecord(payload, user);
-    logAudit(user, "usage.create", payload.materialBatchId ?? "", {
-      userName: payload.userName ?? "",
-      quantity: payload.usedQuantity ?? "",
-    });
-    return Response.json(state, { status: 201 });
+    const result = createUsageRecord(payload, user);
+    logAudit(user, "usage.create", result.record.id, usageAuditDetails(result.record));
+    return Response.json(result.state, { status: 201 });
   } catch (error) {
     return jsonError(error, 400);
   }
@@ -34,14 +51,14 @@ export async function PATCH(request: Request) {
   try {
     const payload = (await request.json()) as { id?: string; action?: string };
     if (payload.action === "issue") {
-      const state = issueUsageRecord(payload.id ?? "", user);
-      logAudit(user, "usage.issue", payload.id ?? "", {});
-      return Response.json(state);
+      const result = issueUsageRecord(payload.id ?? "", user);
+      logAudit(user, "usage.issue", result.record.id, usageAuditDetails(result.record));
+      return Response.json(result.state);
     }
     if (payload.action === "undoIssue") {
-      const state = undoIssueUsageRecord(payload.id ?? "");
-      logAudit(user, "usage.undoIssue", payload.id ?? "", {});
-      return Response.json(state);
+      const result = undoIssueUsageRecord(payload.id ?? "");
+      logAudit(user, "usage.undoIssue", result.record.id, usageAuditDetails(result.record));
+      return Response.json(result.state);
     }
     throw new Error("不支持的出库操作。");
   } catch (error) {
@@ -56,9 +73,9 @@ export async function DELETE(request: Request) {
   try {
     const url = new URL(request.url);
     const id = url.searchParams.get("id") ?? "";
-    const state = deleteUsageRecord(id, user);
-    logAudit(user, "usage.delete", id, {});
-    return Response.json(state);
+    const result = deleteUsageRecord(id, user);
+    logAudit(user, "usage.delete", result.record.id, usageAuditDetails(result.record));
+    return Response.json(result.state);
   } catch (error) {
     return jsonError(error, 400);
   }

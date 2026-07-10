@@ -23,6 +23,7 @@ export type AuditLog = {
   id: string;
   userId: string;
   username: string;
+  displayName: string;
   action: string;
   target: string;
   details: string;
@@ -77,6 +78,7 @@ export type UsageRecord = {
   materialName: string;
   batchNo: string;
   userName: string;
+  unit: string;
   usedDate: string;
   usedQuantity: number;
   purpose: string;
@@ -84,9 +86,11 @@ export type UsageRecord = {
   status: UsageStatus;
   submittedByUserId: string;
   submittedByUsername: string;
+  submittedByDisplayName: string;
   issuedAt: string;
   issuedByUserId: string;
   issuedByUsername: string;
+  issuedByDisplayName: string;
   createdAt: string;
 };
 
@@ -215,6 +219,7 @@ export const initialUsage: UsageRecord[] = [
     materialName: "无水乙醇",
     batchNo: "ET20260601",
     userName: "王珂",
+    unit: "瓶",
     usedDate: "2026-06-18",
     usedQuantity: 4,
     purpose: "样品清洗",
@@ -222,9 +227,11 @@ export const initialUsage: UsageRecord[] = [
     status: "issued",
     submittedByUserId: "demo-user-wang",
     submittedByUsername: "王珂",
+    submittedByDisplayName: "王珂",
     issuedAt: "2026-06-18T09:00:00.000Z",
     issuedByUserId: "demo-manager",
     issuedByUsername: "演示库管员",
+    issuedByDisplayName: "演示库管员",
     createdAt: "2026-06-18T09:00:00.000Z",
   },
   {
@@ -234,6 +241,7 @@ export const initialUsage: UsageRecord[] = [
     materialName: "移液枪吸头",
     batchNo: "TIP2605",
     userName: "李研",
+    unit: "盒",
     usedDate: "2026-06-12",
     usedQuantity: 34,
     purpose: "细胞培养",
@@ -241,9 +249,11 @@ export const initialUsage: UsageRecord[] = [
     status: "issued",
     submittedByUserId: "demo-user-li",
     submittedByUsername: "李研",
+    submittedByDisplayName: "李研",
     issuedAt: "2026-06-12T09:00:00.000Z",
     issuedByUserId: "demo-manager",
     issuedByUsername: "演示库管员",
+    issuedByDisplayName: "演示库管员",
     createdAt: "2026-06-12T09:00:00.000Z",
   },
 ];

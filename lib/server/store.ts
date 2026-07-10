@@ -51,6 +51,7 @@ type UsageRow = {
   material_name: string;
   batch_no: string;
   user_name: string;
+  unit: string;
   used_date: string;
   used_quantity: number;
   purpose: string;
@@ -58,9 +59,11 @@ type UsageRow = {
   status: string;
   submitted_by_user_id: string;
   submitted_by_username: string;
+  submitted_by_display_name: string;
   issued_at: string;
   issued_by_user_id: string;
   issued_by_username: string;
+  issued_by_display_name: string;
   created_at: string;
 };
 
@@ -93,10 +96,16 @@ type AuditLogRow = {
   id: string;
   user_id: string;
   username: string;
+  display_name?: string;
   action: string;
   target: string;
   details: string;
   created_at: string;
+};
+
+type UsageOperationResult = {
+  state: InventoryState;
+  record: UsageRecord;
 };
 
 let cachedDb: DatabaseSync | null = null;
@@ -149,6 +158,7 @@ function getDatabase() {
       material_name TEXT NOT NULL,
       batch_no TEXT NOT NULL,
       user_name TEXT NOT NULL,
+      unit TEXT NOT NULL DEFAULT '',
       used_date TEXT NOT NULL,
       used_quantity REAL NOT NULL,
       purpose TEXT NOT NULL,
@@ -156,9 +166,11 @@ function getDatabase() {
       status TEXT NOT NULL DEFAULT 'issued',
       submitted_by_user_id TEXT NOT NULL DEFAULT '',
       submitted_by_username TEXT NOT NULL DEFAULT '',
+      submitted_by_display_name TEXT NOT NULL DEFAULT '',
       issued_at TEXT NOT NULL DEFAULT '',
       issued_by_user_id TEXT NOT NULL DEFAULT '',
       issued_by_username TEXT NOT NULL DEFAULT '',
+      issued_by_display_name TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       FOREIGN KEY (material_batch_id) REFERENCES materials(id)
     );
@@ -212,12 +224,15 @@ function getDatabase() {
   `);
   ensureColumn(db, "materials", "sap_no", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "sap_no", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "usage_records", "unit", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "status", "TEXT NOT NULL DEFAULT 'issued'");
   ensureColumn(db, "usage_records", "submitted_by_user_id", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "submitted_by_username", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "usage_records", "submitted_by_display_name", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "issued_at", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "issued_by_user_id", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "usage_records", "issued_by_username", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "usage_records", "issued_by_display_name", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "reservation_records", "received_at", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "reservation_records", "received_batch_id", "TEXT NOT NULL DEFAULT ''");
   migrateUsageRecordStatus(db);
@@ -238,6 +253,21 @@ function migrateUsageRecordStatus(db: DatabaseSync) {
   db.prepare("UPDATE usage_records SET status = 'issued' WHERE status NOT IN ('pending', 'issued') OR status = ''").run();
   db.prepare("UPDATE usage_records SET issued_at = created_at WHERE status = 'issued' AND issued_at = ''").run();
   db.prepare("UPDATE usage_records SET submitted_by_username = user_name WHERE submitted_by_username = ''").run();
+  db.prepare(`
+    UPDATE usage_records
+    SET unit = COALESCE((SELECT unit FROM materials WHERE materials.id = usage_records.material_batch_id), '')
+    WHERE unit = ''
+  `).run();
+  db.prepare(`
+    UPDATE usage_records
+    SET submitted_by_display_name = COALESCE((SELECT display_name FROM users WHERE users.id = usage_records.submitted_by_user_id), submitted_by_username)
+    WHERE submitted_by_display_name = ''
+  `).run();
+  db.prepare(`
+    UPDATE usage_records
+    SET issued_by_display_name = COALESCE((SELECT display_name FROM users WHERE users.id = usage_records.issued_by_user_id), issued_by_username)
+    WHERE issued_by_display_name = ''
+  `).run();
 }
 
 function requiredBootstrapPassword() {
@@ -304,6 +334,7 @@ function auditLogFromRow(row: AuditLogRow): AuditLog {
     id: row.id,
     userId: row.user_id,
     username: row.username,
+    displayName: row.display_name || row.username,
     action: row.action,
     target: row.target,
     details: row.details,
@@ -345,6 +376,7 @@ function usageFromRow(row: UsageRow): UsageRecord {
     materialName: row.material_name,
     batchNo: row.batch_no,
     userName: row.user_name,
+    unit: row.unit,
     usedDate: row.used_date,
     usedQuantity: row.used_quantity,
     purpose: row.purpose,
@@ -352,9 +384,11 @@ function usageFromRow(row: UsageRow): UsageRecord {
     status: usageStatusFromRow(row),
     submittedByUserId: row.submitted_by_user_id,
     submittedByUsername: row.submitted_by_username,
+    submittedByDisplayName: row.submitted_by_display_name,
     issuedAt: row.issued_at,
     issuedByUserId: row.issued_by_user_id,
     issuedByUsername: row.issued_by_username,
+    issuedByDisplayName: row.issued_by_display_name,
     createdAt: row.created_at,
   };
 }
@@ -407,10 +441,11 @@ function insertUsage(db: DatabaseSync, record: UsageRecord) {
   db.prepare(`
     INSERT INTO usage_records (
       id, material_batch_id, sap_no, material_name, batch_no, user_name,
-      used_date, used_quantity, purpose, notes, status, submitted_by_user_id,
-      submitted_by_username, issued_at, issued_by_user_id, issued_by_username, created_at
+      unit, used_date, used_quantity, purpose, notes, status, submitted_by_user_id,
+      submitted_by_username, submitted_by_display_name, issued_at, issued_by_user_id,
+      issued_by_username, issued_by_display_name, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     record.id,
     record.materialBatchId,
@@ -418,6 +453,7 @@ function insertUsage(db: DatabaseSync, record: UsageRecord) {
     record.materialName,
     record.batchNo,
     record.userName,
+    record.unit,
     record.usedDate,
     record.usedQuantity,
     record.purpose,
@@ -425,9 +461,11 @@ function insertUsage(db: DatabaseSync, record: UsageRecord) {
     record.status,
     record.submittedByUserId,
     record.submittedByUsername,
+    record.submittedByDisplayName,
     record.issuedAt,
     record.issuedByUserId,
     record.issuedByUsername,
+    record.issuedByDisplayName,
     record.createdAt,
   );
 }
@@ -704,9 +742,28 @@ export function changeOwnPassword(input: PasswordChangeInput, actor: CurrentUser
 export function listAuditLogs(actor: CurrentUser, includeAllUsers: boolean): AuditLog[] {
   const db = getDatabase();
   const rows = includeAllUsers
-    ? (db.prepare("SELECT * FROM audit_logs ORDER BY created_at DESC, id DESC LIMIT 500").all() as AuditLogRow[])
+    ? (db
+        .prepare(
+          `
+            SELECT audit_logs.*, COALESCE(users.display_name, audit_logs.username) AS display_name
+            FROM audit_logs
+            LEFT JOIN users ON users.id = audit_logs.user_id
+            ORDER BY audit_logs.created_at DESC, audit_logs.id DESC
+            LIMIT 500
+          `,
+        )
+        .all() as AuditLogRow[])
     : (db
-        .prepare("SELECT * FROM audit_logs WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 500")
+        .prepare(
+          `
+            SELECT audit_logs.*, COALESCE(users.display_name, audit_logs.username) AS display_name
+            FROM audit_logs
+            LEFT JOIN users ON users.id = audit_logs.user_id
+            WHERE audit_logs.user_id = ?
+            ORDER BY audit_logs.created_at DESC, audit_logs.id DESC
+            LIMIT 500
+          `,
+        )
         .all(actor.id) as AuditLogRow[]);
   return rows.map(auditLogFromRow);
 }
@@ -830,7 +887,7 @@ export function deleteMaterial(materialBatchId: string): InventoryState {
   return getInventoryState();
 }
 
-export function createUsageRecord(input: UsageInput, actor: CurrentUser): InventoryState {
+export function createUsageRecord(input: UsageInput, actor: CurrentUser): UsageOperationResult {
   const db = getDatabase();
   const materialBatchId = requiredText(input.materialBatchId);
   const userName = requiredText(input.userName);
@@ -840,6 +897,7 @@ export function createUsageRecord(input: UsageInput, actor: CurrentUser): Invent
     throw new Error("请选择可领用批次，并填写领用人、日期和大于 0 的领用量。");
   }
 
+  let createdRecord: UsageRecord | null = null;
   db.exec("BEGIN IMMEDIATE;");
   try {
     const batch = db.prepare("SELECT * FROM materials WHERE id = ?").get(materialBatchId) as MaterialRow | undefined;
@@ -857,6 +915,7 @@ export function createUsageRecord(input: UsageInput, actor: CurrentUser): Invent
       materialName: batch.name,
       batchNo: batch.batch_no,
       userName,
+      unit: batch.unit,
       usedDate,
       usedQuantity,
       purpose: requiredText(input.purpose),
@@ -864,34 +923,40 @@ export function createUsageRecord(input: UsageInput, actor: CurrentUser): Invent
       status: "pending",
       submittedByUserId: actor.id,
       submittedByUsername: actor.username,
+      submittedByDisplayName: actor.displayName,
       issuedAt: "",
       issuedByUserId: "",
       issuedByUsername: "",
+      issuedByDisplayName: "",
       createdAt: now,
     };
 
     insertUsage(db, record);
+    createdRecord = record;
     db.exec("COMMIT;");
   } catch (error) {
     db.exec("ROLLBACK;");
     throw error;
   }
 
-  return getInventoryState();
+  if (!createdRecord) throw new Error("领用登记创建失败。");
+  return { state: getInventoryState(), record: createdRecord };
 }
 
-export function issueUsageRecord(usageRecordId: string, actor: CurrentUser): InventoryState {
+export function issueUsageRecord(usageRecordId: string, actor: CurrentUser): UsageOperationResult {
   const db = getDatabase();
   const id = requiredText(usageRecordId);
   if (!id) throw new Error("缺少要出库的领用记录。");
 
+  let changedRecord: UsageRecord | null = null;
   db.exec("BEGIN IMMEDIATE;");
   try {
     const record = db.prepare("SELECT * FROM usage_records WHERE id = ?").get(id) as UsageRow | undefined;
     if (!record) throw new Error("所选领用记录不存在，请刷新页面后重试。");
     if (record.status === "issued") {
+      changedRecord = usageFromRow(record);
       db.exec("COMMIT;");
-      return getInventoryState();
+      return { state: getInventoryState(), record: changedRecord };
     }
 
     const batch = db.prepare("SELECT * FROM materials WHERE id = ?").get(record.material_batch_id) as
@@ -911,30 +976,35 @@ export function issueUsageRecord(usageRecordId: string, actor: CurrentUser): Inv
     );
     db.prepare(`
       UPDATE usage_records
-      SET status = 'issued', issued_at = ?, issued_by_user_id = ?, issued_by_username = ?
+      SET status = 'issued', issued_at = ?, issued_by_user_id = ?, issued_by_username = ?, issued_by_display_name = ?
       WHERE id = ?
-    `).run(now, actor.id, actor.username, id);
+    `).run(now, actor.id, actor.username, actor.displayName, id);
+    const updated = db.prepare("SELECT * FROM usage_records WHERE id = ?").get(id) as UsageRow;
+    changedRecord = usageFromRow(updated);
     db.exec("COMMIT;");
   } catch (error) {
     db.exec("ROLLBACK;");
     throw error;
   }
 
-  return getInventoryState();
+  if (!changedRecord) throw new Error("出库失败。");
+  return { state: getInventoryState(), record: changedRecord };
 }
 
-export function undoIssueUsageRecord(usageRecordId: string): InventoryState {
+export function undoIssueUsageRecord(usageRecordId: string): UsageOperationResult {
   const db = getDatabase();
   const id = requiredText(usageRecordId);
   if (!id) throw new Error("缺少要撤销出库的领用记录。");
 
+  let changedRecord: UsageRecord | null = null;
   db.exec("BEGIN IMMEDIATE;");
   try {
     const record = db.prepare("SELECT * FROM usage_records WHERE id = ?").get(id) as UsageRow | undefined;
     if (!record) throw new Error("所选领用记录不存在，请刷新页面后重试。");
     if (record.status !== "issued") {
+      changedRecord = usageFromRow(record);
       db.exec("COMMIT;");
-      return getInventoryState();
+      return { state: getInventoryState(), record: changedRecord };
     }
 
     const batch = db.prepare("SELECT * FROM materials WHERE id = ?").get(record.material_batch_id) as
@@ -950,19 +1020,22 @@ export function undoIssueUsageRecord(usageRecordId: string): InventoryState {
     );
     db.prepare(`
       UPDATE usage_records
-      SET status = 'pending', issued_at = '', issued_by_user_id = '', issued_by_username = ''
+      SET status = 'pending', issued_at = '', issued_by_user_id = '', issued_by_username = '', issued_by_display_name = ''
       WHERE id = ?
     `).run(id);
+    const updated = db.prepare("SELECT * FROM usage_records WHERE id = ?").get(id) as UsageRow;
+    changedRecord = usageFromRow(updated);
     db.exec("COMMIT;");
   } catch (error) {
     db.exec("ROLLBACK;");
     throw error;
   }
 
-  return getInventoryState();
+  if (!changedRecord) throw new Error("撤销出库失败。");
+  return { state: getInventoryState(), record: changedRecord };
 }
 
-export function deleteUsageRecord(usageRecordId: string, actor: CurrentUser): InventoryState {
+export function deleteUsageRecord(usageRecordId: string, actor: CurrentUser): UsageOperationResult {
   const db = getDatabase();
   const id = requiredText(usageRecordId);
   if (!id) throw new Error("缺少要删除的领用记录。");
@@ -975,8 +1048,9 @@ export function deleteUsageRecord(usageRecordId: string, actor: CurrentUser): In
     throw new Error("只能删除自己提交且尚未出库的领用记录。");
   }
 
+  const deletedRecord = usageFromRow(record);
   db.prepare("DELETE FROM usage_records WHERE id = ?").run(id);
-  return getInventoryState();
+  return { state: getInventoryState(), record: deletedRecord };
 }
 
 export function createReservation(input: ReservationInput): InventoryState {
