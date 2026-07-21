@@ -579,8 +579,8 @@ export default function Home() {
                   value={reservationSort}
                   onChange={(event) => setReservationSort(event.target.value as ReservationSort)}
                 >
-                  <option value="oldest">时间老的在前</option>
-                  <option value="newest">时间新的在前</option>
+                  <option value="oldest">按时间拟序排列</option>
+                  <option value="newest">按时间正序排列</option>
                 </select>
               </label>
               <label className="checkbox-field">
@@ -589,7 +589,7 @@ export default function Home() {
                   checked={hideReceivedReservations}
                   onChange={(event) => setHideReceivedReservations(event.target.checked)}
                 />
-                隐藏已入研发库
+                隐藏已入库物料
               </label>
             </>
           ) : null}
