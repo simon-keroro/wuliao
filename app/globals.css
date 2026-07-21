@@ -269,6 +269,24 @@ h2 {
   padding: 14px;
 }
 
+.checkbox-field {
+  min-height: 42px;
+  align-self: end;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--foreground);
+  padding: 9px 11px;
+}
+
+.checkbox-field input {
+  width: 16px;
+  min-height: 16px;
+}
+
 .panel {
   padding: 18px;
 }

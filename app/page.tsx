@@ -7,6 +7,7 @@ import { APP_DISPLAY_TITLE } from "@/lib/version";
 type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList";
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
+type ReservationSort = "oldest" | "newest";
 type BackupResponse = {
   ok: boolean;
   sent: boolean;
@@ -145,6 +146,8 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
+  const [reservationSort, setReservationSort] = useState<ReservationSort>("oldest");
+  const [hideReceivedReservations, setHideReceivedReservations] = useState(false);
   const [message, setMessage] = useState("");
 
   const applyState = useCallback((state: InventoryState) => {
@@ -229,15 +232,23 @@ export default function Home() {
 
   const filteredReservations = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return reservationRecords.filter((record) =>
-      !keyword
-        ? true
-        : [record.requester, record.sapNo, record.materialName, record.unit, record.expectedDate]
-            .join(" ")
-            .toLowerCase()
-            .includes(keyword),
-    );
-  }, [reservationRecords, query]);
+    return reservationRecords
+      .filter((record) => {
+        if (hideReceivedReservations && record.receivedAt) return false;
+        return !keyword
+          ? true
+          : [record.requester, record.sapNo, record.materialName, record.unit, record.expectedDate]
+              .join(" ")
+              .toLowerCase()
+              .includes(keyword);
+      })
+      .sort((a, b) => {
+        const direction = reservationSort === "newest" ? -1 : 1;
+        const dateCompare = a.expectedDate.localeCompare(b.expectedDate);
+        if (dateCompare !== 0) return dateCompare * direction;
+        return a.createdAt.localeCompare(b.createdAt) * direction;
+      });
+  }, [reservationRecords, query, reservationSort, hideReceivedReservations]);
 
   async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -557,6 +568,28 @@ export default function Home() {
                   <option value="low">低库存</option>
                   <option value="empty">用尽</option>
                 </select>
+              </label>
+            </>
+          ) : null}
+          {activeTab === "reservationList" ? (
+            <>
+              <label>
+                排序
+                <select
+                  value={reservationSort}
+                  onChange={(event) => setReservationSort(event.target.value as ReservationSort)}
+                >
+                  <option value="oldest">时间老的在前</option>
+                  <option value="newest">时间新的在前</option>
+                </select>
+              </label>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={hideReceivedReservations}
+                  onChange={(event) => setHideReceivedReservations(event.target.checked)}
+                />
+                隐藏已入研发库
               </label>
             </>
           ) : null}
