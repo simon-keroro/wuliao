@@ -146,7 +146,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
-  const [reservationSort, setReservationSort] = useState<ReservationSort>("oldest");
+  const [reservationSort, setReservationSort] = useState<ReservationSort>("newest");
   const [hideReceivedReservations, setHideReceivedReservations] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -579,7 +579,7 @@ export default function Home() {
                   value={reservationSort}
                   onChange={(event) => setReservationSort(event.target.value as ReservationSort)}
                 >
-                  <option value="oldest">按时间拟序排列</option>
+                  <option value="oldest">按时间逆序排列</option>
                   <option value="newest">按时间正序排列</option>
                 </select>
               </label>
