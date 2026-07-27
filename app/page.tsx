@@ -146,6 +146,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
   const [stockFilter, setStockFilter] = useState<StockFilter>("all");
+  const [showZeroStockMaterials, setShowZeroStockMaterials] = useState(false);
   const [reservationSort, setReservationSort] = useState<ReservationSort>("newest");
   const [hideReceivedReservations, setHideReceivedReservations] = useState(false);
   const [message, setMessage] = useState("");
@@ -214,9 +215,10 @@ export default function Home() {
       const stockStatus = getStockStatus(batch).key;
       const matchesExpiry = expiryFilter === "all" || expiryStatus === expiryFilter;
       const matchesStock = stockFilter === "all" || stockStatus === stockFilter;
-      return matchesKeyword && matchesExpiry && matchesStock;
+      const matchesZeroStockVisibility = showZeroStockMaterials || batch.remainingQuantity > 0;
+      return matchesKeyword && matchesExpiry && matchesStock && matchesZeroStockVisibility;
     });
-  }, [materials, query, expiryFilter, stockFilter]);
+  }, [materials, query, expiryFilter, stockFilter, showZeroStockMaterials]);
 
   const filteredUsage = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -568,6 +570,14 @@ export default function Home() {
                   <option value="low">低库存</option>
                   <option value="empty">用尽</option>
                 </select>
+              </label>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={showZeroStockMaterials}
+                  onChange={(event) => setShowZeroStockMaterials(event.target.checked)}
+                />
+                显示0库存物料
               </label>
             </>
           ) : null}
