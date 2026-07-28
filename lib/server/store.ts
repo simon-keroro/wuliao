@@ -553,6 +553,10 @@ export function createUsageRecord(input: UsageInput): InventoryState {
 }
 
 export function createReservation(input: ReservationInput): InventoryState {
+  return createReservations([input]);
+}
+
+function validateReservationInput(input: ReservationInput) {
   const requester = requiredText(input.requester);
   const sapNo = requiredText(input.sapNo);
   const materialName = requiredText(input.materialName);
@@ -567,19 +571,53 @@ export function createReservation(input: ReservationInput): InventoryState {
     throw new Error("SAP号必须是 8 位数字。");
   }
 
-  const record: ReservationRecord = {
-    id: `reservation-${randomUUID()}`,
+  return {
     requester,
     sapNo,
     materialName,
     unit,
     quantity,
     expectedDate,
-    receivedAt: "",
-    receivedBatchId: "",
-    createdAt: new Date().toISOString(),
   };
-  insertReservation(getDatabase(), record);
+}
+
+export function createReservations(inputs: ReservationInput[]): InventoryState {
+  if (!Array.isArray(inputs) || inputs.length === 0) {
+    throw new Error("请至少提交 1 条预约记录。");
+  }
+  if (inputs.length > 200) {
+    throw new Error("单次最多提交 200 条预约记录。");
+  }
+
+  const now = new Date().toISOString();
+  const records = inputs.map((input, index) => {
+    try {
+      const reservation = validateReservationInput(input);
+      return {
+        id: `reservation-${randomUUID()}`,
+        ...reservation,
+        receivedAt: "",
+        receivedBatchId: "",
+        createdAt: now,
+      } satisfies ReservationRecord;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "预约记录格式不正确。";
+      throw new Error(`第 ${index + 1} 行：${message}`);
+    }
+  });
+
+  const db = getDatabase();
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    for (const record of records) {
+      insertReservation(db, record);
+    }
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+
   return getInventoryState();
 }
 

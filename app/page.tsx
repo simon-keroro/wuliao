@@ -8,12 +8,38 @@ type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
 type ReservationSort = "oldest" | "newest";
+type BulkColumnKey = "ignore" | "sapNo" | "materialName" | "quantity" | "unit";
+type BulkReservationDraft = {
+  rowNumber: number;
+  sapNo: string;
+  materialName: string;
+  quantity: string;
+  unit: string;
+  errors: string[];
+};
 type BackupResponse = {
   ok: boolean;
   sent: boolean;
   to: string;
   generatedAt: string;
 };
+
+const bulkColumnOptions: { value: BulkColumnKey; label: string }[] = [
+  { value: "ignore", label: "忽略" },
+  { value: "sapNo", label: "SAP号" },
+  { value: "materialName", label: "物料名称" },
+  { value: "quantity", label: "数量" },
+  { value: "unit", label: "单位" },
+];
+
+const headerAliases: Record<Exclude<BulkColumnKey, "ignore">, string[]> = {
+  sapNo: ["sap号", "sap", "物料号", "物料编码", "编码", "编号"],
+  materialName: ["物料名称", "物料名", "名称", "品名", "商品名称", "物料", "耗材名称"],
+  quantity: ["数量", "申请数量", "预约数量", "领用数量", "需求数量", "个数"],
+  unit: ["单位", "计量单位", "包装单位"],
+};
+
+const commonUnits = new Set(["个", "件", "瓶", "盒", "包", "支", "袋", "套", "根", "卷", "片", "板", "箱"]);
 
 const THIRTY_DAYS = 1000 * 60 * 60 * 24 * 30;
 function getTodayDate() {
@@ -65,6 +91,110 @@ function daysUntil(dateValue: string) {
 function formatWeekday(dateValue: string) {
   if (!dateValue) return "";
   return new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date(`${dateValue}T00:00:00`));
+}
+
+function normalizeCell(value: string) {
+  return value.trim().replace(/\s+/g, "").toLowerCase();
+}
+
+function splitPasteLine(line: string) {
+  if (line.includes("\t")) return line.split("\t").map((cell) => cell.trim());
+  if (line.includes(",")) return line.split(",").map((cell) => cell.trim());
+  return line.trim().split(/\s+/).map((cell) => cell.trim());
+}
+
+function parseBulkPasteText(text: string) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => splitPasteLine(line))
+    .filter((row) => row.some(Boolean));
+}
+
+function detectHeaderColumn(cell: string): BulkColumnKey {
+  const normalized = normalizeCell(cell);
+  for (const [key, aliases] of Object.entries(headerAliases) as [Exclude<BulkColumnKey, "ignore">, string[]][]) {
+    if (aliases.some((alias) => normalized === normalizeCell(alias))) return key;
+  }
+  return "ignore";
+}
+
+function isQuantityCell(value: string) {
+  const normalized = value.trim();
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return false;
+  return Number(normalized) > 0;
+}
+
+function isUnitCell(value: string) {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  return commonUnits.has(normalized) || /^[a-zA-Zμu]{1,4}$/.test(normalized);
+}
+
+function guessBulkColumn(values: string[], usedColumns: Set<BulkColumnKey>): BulkColumnKey {
+  const filledValues = values.map((value) => value.trim()).filter(Boolean);
+  if (filledValues.length === 0) return "ignore";
+
+  const scores: Record<Exclude<BulkColumnKey, "ignore">, number> = {
+    sapNo: filledValues.filter((value) => /^\d{8}$/.test(value)).length * 3,
+    quantity: filledValues.filter(isQuantityCell).length * 2,
+    unit: filledValues.filter(isUnitCell).length * 2,
+    materialName: filledValues.filter((value) => value.length > 1 && !isQuantityCell(value)).length,
+  };
+
+  let bestColumn: BulkColumnKey = "ignore";
+  let bestScore = 0;
+  for (const [column, score] of Object.entries(scores) as [Exclude<BulkColumnKey, "ignore">, number][]) {
+    if (!usedColumns.has(column) && score > bestScore) {
+      bestColumn = column;
+      bestScore = score;
+    }
+  }
+  return bestScore > 0 ? bestColumn : "ignore";
+}
+
+function guessBulkColumns(rows: string[][]) {
+  const columnCount = Math.max(...rows.map((row) => row.length), 0);
+  const usedColumns = new Set<BulkColumnKey>();
+  return Array.from({ length: columnCount }, (_, columnIndex) => {
+    const column = guessBulkColumn(
+      rows.map((row) => row[columnIndex] ?? ""),
+      usedColumns,
+    );
+    if (column !== "ignore") usedColumns.add(column);
+    return column;
+  });
+}
+
+function detectBulkColumns(rows: string[][]) {
+  const columnCount = Math.max(...rows.map((row) => row.length), 0);
+  const headerMapping = Array.from({ length: columnCount }, (_, index) => detectHeaderColumn(rows[0]?.[index] ?? ""));
+  const headerHits = new Set(headerMapping.filter((column) => column !== "ignore")).size;
+  if (headerHits >= 2) {
+    return { hasHeader: true, mapping: headerMapping };
+  }
+
+  return { hasHeader: false, mapping: guessBulkColumns(rows) };
+}
+
+function getMappedCell(row: string[], mapping: BulkColumnKey[], column: BulkColumnKey) {
+  const index = mapping.findIndex((item) => item === column);
+  return index >= 0 ? row[index]?.trim() ?? "" : "";
+}
+
+function buildBulkReservationDrafts(rows: string[][], mapping: BulkColumnKey[], hasHeader: boolean) {
+  const dataRows = hasHeader ? rows.slice(1) : rows;
+  return dataRows.map((row, index): BulkReservationDraft => {
+    const sapNo = getMappedCell(row, mapping, "sapNo");
+    const materialName = getMappedCell(row, mapping, "materialName");
+    const quantity = getMappedCell(row, mapping, "quantity");
+    const unit = getMappedCell(row, mapping, "unit");
+    const errors: string[] = [];
+    if (sapNo && !/^\d{8}$/.test(sapNo)) errors.push("SAP号不是8位数字");
+    if (!materialName) errors.push("缺少物料名称");
+    if (!isQuantityCell(quantity)) errors.push("数量不是大于0的数字");
+    if (!unit) errors.push("缺少单位");
+    return { rowNumber: index + 1, sapNo, materialName, quantity, unit, errors };
+  });
 }
 
 function getExpiryStatus(batch: MaterialBatch) {
@@ -135,6 +265,11 @@ export default function Home() {
   const [materialToDelete, setMaterialToDelete] = useState<MaterialBatch | null>(null);
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [reservationForm, setReservationForm] = useState(() => ({ ...emptyReservation, expectedDate: getTodayDate() }));
+  const [bulkPasteText, setBulkPasteText] = useState("");
+  const [bulkRows, setBulkRows] = useState<string[][]>([]);
+  const [bulkColumnMapping, setBulkColumnMapping] = useState<BulkColumnKey[]>([]);
+  const [bulkHasHeader, setBulkHasHeader] = useState(false);
+  const [bulkMessage, setBulkMessage] = useState("");
   const [password, setPassword] = useState("");
   const [backupPassword, setBackupPassword] = useState("");
   const [backupDialogMessage, setBackupDialogMessage] = useState("");
@@ -251,6 +386,15 @@ export default function Home() {
         return a.createdAt.localeCompare(b.createdAt) * direction;
       });
   }, [reservationRecords, query, reservationSort, hideReceivedReservations]);
+
+  const bulkDrafts = useMemo(
+    () => buildBulkReservationDrafts(bulkRows, bulkColumnMapping, bulkHasHeader),
+    [bulkRows, bulkColumnMapping, bulkHasHeader],
+  );
+  const bulkValidDrafts = bulkDrafts.filter((draft) => draft.errors.length === 0);
+  const bulkErrorCount = bulkDrafts.length - bulkValidDrafts.length;
+  const bulkHasRequiredColumns =
+    bulkColumnMapping.includes("materialName") && bulkColumnMapping.includes("quantity") && bulkColumnMapping.includes("unit");
 
   async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -409,6 +553,86 @@ export default function Home() {
       setActiveTab("reservationList");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "提交预约失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function analyzeBulkPaste() {
+    const rows = parseBulkPasteText(bulkPasteText);
+    if (rows.length === 0) {
+      setBulkRows([]);
+      setBulkColumnMapping([]);
+      setBulkHasHeader(false);
+      setBulkMessage("请先粘贴需要预约的物料数据。");
+      return;
+    }
+    const detected = detectBulkColumns(rows);
+    setBulkRows(rows);
+    setBulkColumnMapping(detected.mapping);
+    setBulkHasHeader(detected.hasHeader);
+    setBulkMessage(detected.hasHeader ? "已按表头识别列含义，请核对后提交。" : "已根据内容推测列含义，请核对后提交。");
+  }
+
+  function clearBulkPaste() {
+    setBulkPasteText("");
+    setBulkRows([]);
+    setBulkColumnMapping([]);
+    setBulkHasHeader(false);
+    setBulkMessage("");
+  }
+
+  function updateBulkColumnMapping(index: number, value: BulkColumnKey) {
+    setBulkColumnMapping((current) => current.map((column, columnIndex) => (columnIndex === index ? value : column)));
+  }
+
+  function updateBulkHeaderMode(hasHeader: boolean) {
+    setBulkHasHeader(hasHeader);
+    if (bulkRows.length === 0) return;
+    if (hasHeader) {
+      const columnCount = Math.max(...bulkRows.map((row) => row.length), 0);
+      setBulkColumnMapping(Array.from({ length: columnCount }, (_, index) => detectHeaderColumn(bulkRows[0]?.[index] ?? "")));
+      return;
+    }
+    setBulkColumnMapping(guessBulkColumns(bulkRows));
+  }
+
+  async function handleBulkReservationSubmit() {
+    if (!bulkHasRequiredColumns) {
+      setBulkMessage("请先指定物料名称、数量和单位所在列。");
+      return;
+    }
+    if (bulkDrafts.length === 0) {
+      setBulkMessage("请先识别粘贴内容。");
+      return;
+    }
+    if (bulkErrorCount > 0) {
+      setBulkMessage("预览中仍有错误，请修正列含义或粘贴内容后再提交。");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>("/api/reservations", {
+        method: "POST",
+        body: JSON.stringify({
+          reservations: bulkValidDrafts.map((draft) => ({
+            requester: reservationForm.requester,
+            expectedDate: reservationForm.expectedDate,
+            sapNo: draft.sapNo,
+            materialName: draft.materialName,
+            quantity: draft.quantity,
+            unit: draft.unit,
+          })),
+        }),
+      });
+      applyState(state);
+      const submittedCount = bulkValidDrafts.length;
+      clearBulkPaste();
+      setMessage(`已批量提交 ${submittedCount} 条领料预约，预约清单已更新。`);
+      setActiveTab("reservationList");
+    } catch (error) {
+      setBulkMessage(error instanceof Error ? error.message : "批量提交预约失败。");
     } finally {
       setIsSubmitting(false);
     }
@@ -721,6 +945,98 @@ export default function Home() {
               <button className="primary" type="submit" disabled={isSubmitting}>提交预约</button>
             </div>
           </form>
+          <div className="bulk-import">
+            <div className="bulk-heading">
+              <h3>批量粘贴预约</h3>
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={bulkHasHeader}
+                  onChange={(event) => updateBulkHeaderMode(event.target.checked)}
+                  disabled={bulkRows.length === 0}
+                />
+                首行是表头
+              </label>
+            </div>
+            <label className="wide">
+              粘贴物料数据
+              <textarea
+                value={bulkPasteText}
+                onChange={(event) => {
+                  setBulkPasteText(event.target.value);
+                  setBulkMessage("");
+                }}
+                placeholder="SAP号	物料名称	数量	单位"
+              />
+            </label>
+            <div className="form-actions">
+              <button className="secondary" type="button" onClick={clearBulkPaste} disabled={isSubmitting}>
+                清空
+              </button>
+              <button className="secondary" type="button" onClick={analyzeBulkPaste} disabled={isSubmitting}>
+                识别粘贴内容
+              </button>
+            </div>
+            {bulkMessage ? <p className={bulkErrorCount > 0 ? "dialog-error" : "inline-note"}>{bulkMessage}</p> : null}
+            {bulkRows.length > 0 ? (
+              <>
+                <div className="table-wrap bulk-preview-wrap">
+                  <table className="bulk-preview-table">
+                    <thead>
+                      <tr>
+                        <th>行号</th>
+                        {bulkColumnMapping.map((column, index) => (
+                          <th key={`bulk-column-${index}`}>
+                            <select
+                              value={column}
+                              onChange={(event) => updateBulkColumnMapping(index, event.target.value as BulkColumnKey)}
+                            >
+                              {bulkColumnOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </th>
+                        ))}
+                        <th>识别状态</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkRows.slice(bulkHasHeader ? 1 : 0).map((row, index) => {
+                        const draft = bulkDrafts[index];
+                        return (
+                          <tr key={`bulk-row-${index}`}>
+                            <td>{draft?.rowNumber ?? index + 1}</td>
+                            {bulkColumnMapping.map((_, columnIndex) => (
+                              <td key={`bulk-cell-${index}-${columnIndex}`}>{row[columnIndex] || "-"}</td>
+                            ))}
+                            <td>
+                              {draft?.errors.length ? (
+                                <span className="bulk-error">{draft.errors.join("；")}</span>
+                              ) : (
+                                <span className="bulk-ok">可提交</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="form-actions">
+                  <button
+                    className="primary"
+                    type="button"
+                    onClick={handleBulkReservationSubmit}
+                    disabled={isSubmitting || bulkDrafts.length === 0 || bulkErrorCount > 0 || !bulkHasRequiredColumns}
+                  >
+                    提交 {bulkValidDrafts.length} 条预约
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
         </section>
       )}
 

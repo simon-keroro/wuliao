@@ -1,6 +1,12 @@
 import type { ReservationInput } from "@/lib/materials";
 import { jsonError, requireAuth } from "@/lib/server/http";
-import { createReservation, deleteReservation, receiveReservation, undoReceiveReservation } from "@/lib/server/store";
+import {
+  createReservation,
+  createReservations,
+  deleteReservation,
+  receiveReservation,
+  undoReceiveReservation,
+} from "@/lib/server/store";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +15,10 @@ export async function POST(request: Request) {
   if (unauthorized) return unauthorized;
 
   try {
-    const payload = (await request.json()) as ReservationInput;
+    const payload = (await request.json()) as ReservationInput | { reservations?: ReservationInput[] };
+    if ("reservations" in payload && Array.isArray(payload.reservations)) {
+      return Response.json(createReservations(payload.reservations), { status: 201 });
+    }
     return Response.json(createReservation(payload), { status: 201 });
   } catch (error) {
     return jsonError(error, 400);

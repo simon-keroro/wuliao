@@ -95,6 +95,7 @@ input:disabled {
 
 h1,
 h2,
+h3,
 p {
   margin: 0;
 }
@@ -107,6 +108,11 @@ h1 {
 
 h2 {
   font-size: 22px;
+  line-height: 1.2;
+}
+
+h3 {
+  font-size: 18px;
   line-height: 1.2;
 }
 
@@ -371,6 +377,56 @@ textarea:focus {
   color: var(--muted);
 }
 
+.bulk-import {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  margin-top: 20px;
+  padding-top: 18px;
+}
+
+.bulk-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.inline-note {
+  border: 1px solid #bed8cd;
+  border-radius: 8px;
+  background: #eef8f3;
+  color: #174f42;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bulk-preview-wrap table {
+  min-width: 980px;
+}
+
+.bulk-preview-table th {
+  vertical-align: middle;
+}
+
+.bulk-preview-table th select {
+  min-width: 130px;
+}
+
+.bulk-error,
+.bulk-ok {
+  font-weight: 800;
+}
+
+.bulk-error {
+  color: var(--danger);
+}
+
+.bulk-ok {
+  color: var(--success);
+}
+
 .table-wrap {
   width: 100%;
   overflow-x: auto;
@@ -598,6 +654,11 @@ small {
   }
 
   .panel-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .bulk-heading {
     align-items: flex-start;
     flex-direction: column;
   }
