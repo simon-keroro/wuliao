@@ -8,14 +8,18 @@ type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
 type StockFilter = "all" | "enough" | "low" | "empty";
 type ReservationSort = "oldest" | "newest";
-type BulkColumnKey = "ignore" | "sapNo" | "materialName" | "quantity" | "unit";
-type BulkReservationDraft = {
-  rowNumber: number;
+type BulkColumnKey = "ignore" | "requester" | "sapNo" | "materialName" | "unit" | "quantity" | "expectedDate";
+type ReservationDraft = {
+  id: string;
+  requester: string;
   sapNo: string;
   materialName: string;
-  quantity: string;
   unit: string;
-  errors: string[];
+  quantity: string;
+  expectedDate: string;
+};
+type BulkReservationDraft = ReservationDraft & {
+  rowNumber: number;
 };
 type BackupResponse = {
   ok: boolean;
@@ -26,17 +30,21 @@ type BackupResponse = {
 
 const bulkColumnOptions: { value: BulkColumnKey; label: string }[] = [
   { value: "ignore", label: "忽略" },
+  { value: "requester", label: "预约人" },
   { value: "sapNo", label: "SAP号" },
   { value: "materialName", label: "物料名称" },
-  { value: "quantity", label: "数量" },
   { value: "unit", label: "单位" },
+  { value: "quantity", label: "数量" },
+  { value: "expectedDate", label: "期望入库日期" },
 ];
 
 const headerAliases: Record<Exclude<BulkColumnKey, "ignore">, string[]> = {
+  requester: ["预约人", "申请人", "领用人", "提交人", "姓名"],
   sapNo: ["sap号", "sap", "物料号", "物料编码", "编码", "编号"],
   materialName: ["物料名称", "物料名", "名称", "品名", "商品名称", "物料", "耗材名称"],
-  quantity: ["数量", "申请数量", "预约数量", "领用数量", "需求数量", "个数"],
   unit: ["单位", "计量单位", "包装单位"],
+  quantity: ["数量", "申请数量", "预约数量", "领用数量", "需求数量", "个数"],
+  expectedDate: ["期望入库日期", "入库日期", "期望日期", "预约日期", "日期", "到货日期"],
 };
 
 const commonUnits = new Set(["个", "件", "瓶", "盒", "包", "支", "袋", "套", "根", "卷", "片", "板", "箱"]);
@@ -69,15 +77,6 @@ const emptyUsage = {
   usedQuantity: "",
   purpose: "",
   notes: "",
-};
-
-const emptyReservation = {
-  requester: "",
-  sapNo: "",
-  materialName: "",
-  unit: "",
-  quantity: "",
-  expectedDate: getTodayDate(),
 };
 
 function daysUntil(dateValue: string) {
@@ -130,14 +129,30 @@ function isUnitCell(value: string) {
   return commonUnits.has(normalized) || /^[a-zA-Zμu]{1,4}$/.test(normalized);
 }
 
+function normalizeDateCell(value: string) {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})日?$/);
+  if (!match) return trimmed;
+  const [, year, month, day] = match;
+  return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+}
+
+function isDateCell(value: string) {
+  const normalized = normalizeDateCell(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return false;
+  return !Number.isNaN(new Date(`${normalized}T00:00:00`).getTime());
+}
+
 function guessBulkColumn(values: string[], usedColumns: Set<BulkColumnKey>): BulkColumnKey {
   const filledValues = values.map((value) => value.trim()).filter(Boolean);
   if (filledValues.length === 0) return "ignore";
 
   const scores: Record<Exclude<BulkColumnKey, "ignore">, number> = {
+    requester: filledValues.filter((value) => value.length >= 2 && value.length <= 8 && !isQuantityCell(value)).length * 0.75,
     sapNo: filledValues.filter((value) => /^\d{8}$/.test(value)).length * 3,
     quantity: filledValues.filter(isQuantityCell).length * 2,
     unit: filledValues.filter(isUnitCell).length * 2,
+    expectedDate: filledValues.filter(isDateCell).length * 3,
     materialName: filledValues.filter((value) => value.length > 1 && !isQuantityCell(value)).length,
   };
 
@@ -181,19 +196,48 @@ function getMappedCell(row: string[], mapping: BulkColumnKey[], column: BulkColu
   return index >= 0 ? row[index]?.trim() ?? "" : "";
 }
 
+function createReservationDraft(partial: Partial<ReservationDraft> = {}, id = `reservation-row-${Date.now()}-${Math.random()}`): ReservationDraft {
+  return {
+    id,
+    requester: partial.requester ?? "",
+    sapNo: partial.sapNo ?? "",
+    materialName: partial.materialName ?? "",
+    unit: partial.unit ?? "",
+    quantity: partial.quantity ?? "",
+    expectedDate: partial.expectedDate ?? getTodayDate(),
+  };
+}
+
+function validateReservationDraft(draft: ReservationDraft) {
+  const errors: string[] = [];
+  if (draft.sapNo && !/^\d{8}$/.test(draft.sapNo)) errors.push("SAP号不是8位数字");
+  if (!draft.materialName.trim()) errors.push("缺少物料名称");
+  if (!draft.unit.trim()) errors.push("缺少单位");
+  if (!isQuantityCell(draft.quantity)) errors.push("数量不是大于0的数字");
+  if (!isDateCell(draft.expectedDate)) errors.push("缺少期望入库日期");
+  return errors;
+}
+
+function isEmptyReservationDraft(draft: ReservationDraft) {
+  return ![draft.requester, draft.sapNo, draft.materialName, draft.unit, draft.quantity].some((value) => value.trim());
+}
+
 function buildBulkReservationDrafts(rows: string[][], mapping: BulkColumnKey[], hasHeader: boolean) {
   const dataRows = hasHeader ? rows.slice(1) : rows;
   return dataRows.map((row, index): BulkReservationDraft => {
-    const sapNo = getMappedCell(row, mapping, "sapNo");
-    const materialName = getMappedCell(row, mapping, "materialName");
-    const quantity = getMappedCell(row, mapping, "quantity");
-    const unit = getMappedCell(row, mapping, "unit");
-    const errors: string[] = [];
-    if (sapNo && !/^\d{8}$/.test(sapNo)) errors.push("SAP号不是8位数字");
-    if (!materialName) errors.push("缺少物料名称");
-    if (!isQuantityCell(quantity)) errors.push("数量不是大于0的数字");
-    if (!unit) errors.push("缺少单位");
-    return { rowNumber: index + 1, sapNo, materialName, quantity, unit, errors };
+    const expectedDate = normalizeDateCell(getMappedCell(row, mapping, "expectedDate")) || getTodayDate();
+    const draft = createReservationDraft(
+      {
+        requester: getMappedCell(row, mapping, "requester"),
+        sapNo: getMappedCell(row, mapping, "sapNo"),
+        materialName: getMappedCell(row, mapping, "materialName"),
+        unit: getMappedCell(row, mapping, "unit"),
+        quantity: getMappedCell(row, mapping, "quantity"),
+        expectedDate,
+      },
+      `bulk-row-${index + 1}`,
+    );
+    return { ...draft, rowNumber: index + 1 };
   });
 }
 
@@ -264,10 +308,13 @@ export default function Home() {
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [materialToDelete, setMaterialToDelete] = useState<MaterialBatch | null>(null);
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
-  const [reservationForm, setReservationForm] = useState(() => ({ ...emptyReservation, expectedDate: getTodayDate() }));
+  const [manualReservations, setManualReservations] = useState<ReservationDraft[]>(() => [
+    createReservationDraft({}, "manual-row-1"),
+  ]);
   const [bulkPasteText, setBulkPasteText] = useState("");
   const [bulkRows, setBulkRows] = useState<string[][]>([]);
   const [bulkColumnMapping, setBulkColumnMapping] = useState<BulkColumnKey[]>([]);
+  const [bulkDrafts, setBulkDrafts] = useState<BulkReservationDraft[]>([]);
   const [bulkHasHeader, setBulkHasHeader] = useState(false);
   const [bulkMessage, setBulkMessage] = useState("");
   const [password, setPassword] = useState("");
@@ -387,14 +434,10 @@ export default function Home() {
       });
   }, [reservationRecords, query, reservationSort, hideReceivedReservations]);
 
-  const bulkDrafts = useMemo(
-    () => buildBulkReservationDrafts(bulkRows, bulkColumnMapping, bulkHasHeader),
-    [bulkRows, bulkColumnMapping, bulkHasHeader],
-  );
-  const bulkValidDrafts = bulkDrafts.filter((draft) => draft.errors.length === 0);
+  const manualActiveReservations = manualReservations.filter((draft) => !isEmptyReservationDraft(draft));
+  const manualErrorCount = manualActiveReservations.filter((draft) => validateReservationDraft(draft).length > 0).length;
+  const bulkValidDrafts = bulkDrafts.filter((draft) => validateReservationDraft(draft).length === 0);
   const bulkErrorCount = bulkDrafts.length - bulkValidDrafts.length;
-  const bulkHasRequiredColumns =
-    bulkColumnMapping.includes("materialName") && bulkColumnMapping.includes("quantity") && bulkColumnMapping.includes("unit");
 
   async function handleLoginSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -539,17 +582,55 @@ export default function Home() {
     }
   }
 
+  function reservationPayloadFromDraft(draft: ReservationDraft) {
+    return {
+      requester: draft.requester.trim(),
+      sapNo: draft.sapNo.trim(),
+      materialName: draft.materialName.trim(),
+      unit: draft.unit.trim(),
+      quantity: draft.quantity.trim(),
+      expectedDate: normalizeDateCell(draft.expectedDate),
+    };
+  }
+
+  function updateManualReservation(index: number, field: keyof Omit<ReservationDraft, "id">, value: string) {
+    setManualReservations((current) =>
+      current.map((draft, draftIndex) => (draftIndex === index ? { ...draft, [field]: value } : draft)),
+    );
+  }
+
+  function addManualReservationRow() {
+    setManualReservations((current) => [...current, createReservationDraft()]);
+  }
+
+  function removeManualReservationRow(index: number) {
+    setManualReservations((current) => {
+      const next = current.filter((_, draftIndex) => draftIndex !== index);
+      return next.length > 0 ? next : [createReservationDraft()];
+    });
+  }
+
   async function handleReservationSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (manualActiveReservations.length === 0) {
+      setMessage("请至少填写 1 行预约物料。");
+      return;
+    }
+    if (manualErrorCount > 0) {
+      setMessage("请检查预约表格中未填写完整或格式不正确的行。");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const state = await requestJson<InventoryState>("/api/reservations", {
         method: "POST",
-        body: JSON.stringify(reservationForm),
+        body: JSON.stringify({ reservations: manualActiveReservations.map(reservationPayloadFromDraft) }),
       });
       applyState(state);
-      setReservationForm({ ...emptyReservation, expectedDate: getTodayDate() });
-      setMessage("领料预约已提交，预约清单已更新。");
+      const submittedCount = manualActiveReservations.length;
+      setManualReservations([createReservationDraft({}, "manual-row-1")]);
+      setMessage(`已提交 ${submittedCount} 条领料预约，预约清单已更新。`);
       setActiveTab("reservationList");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "提交预约失败。");
@@ -563,6 +644,7 @@ export default function Home() {
     if (rows.length === 0) {
       setBulkRows([]);
       setBulkColumnMapping([]);
+      setBulkDrafts([]);
       setBulkHasHeader(false);
       setBulkMessage("请先粘贴需要预约的物料数据。");
       return;
@@ -570,6 +652,7 @@ export default function Home() {
     const detected = detectBulkColumns(rows);
     setBulkRows(rows);
     setBulkColumnMapping(detected.mapping);
+    setBulkDrafts(buildBulkReservationDrafts(rows, detected.mapping, detected.hasHeader));
     setBulkHasHeader(detected.hasHeader);
     setBulkMessage(detected.hasHeader ? "已按表头识别列含义，请核对后提交。" : "已根据内容推测列含义，请核对后提交。");
   }
@@ -578,12 +661,17 @@ export default function Home() {
     setBulkPasteText("");
     setBulkRows([]);
     setBulkColumnMapping([]);
+    setBulkDrafts([]);
     setBulkHasHeader(false);
     setBulkMessage("");
   }
 
   function updateBulkColumnMapping(index: number, value: BulkColumnKey) {
-    setBulkColumnMapping((current) => current.map((column, columnIndex) => (columnIndex === index ? value : column)));
+    setBulkColumnMapping((current) => {
+      const next = current.map((column, columnIndex) => (columnIndex === index ? value : column));
+      setBulkDrafts(buildBulkReservationDrafts(bulkRows, next, bulkHasHeader));
+      return next;
+    });
   }
 
   function updateBulkHeaderMode(hasHeader: boolean) {
@@ -591,23 +679,29 @@ export default function Home() {
     if (bulkRows.length === 0) return;
     if (hasHeader) {
       const columnCount = Math.max(...bulkRows.map((row) => row.length), 0);
-      setBulkColumnMapping(Array.from({ length: columnCount }, (_, index) => detectHeaderColumn(bulkRows[0]?.[index] ?? "")));
+      const next = Array.from({ length: columnCount }, (_, index) => detectHeaderColumn(bulkRows[0]?.[index] ?? ""));
+      setBulkColumnMapping(next);
+      setBulkDrafts(buildBulkReservationDrafts(bulkRows, next, true));
       return;
     }
-    setBulkColumnMapping(guessBulkColumns(bulkRows));
+    const next = guessBulkColumns(bulkRows);
+    setBulkColumnMapping(next);
+    setBulkDrafts(buildBulkReservationDrafts(bulkRows, next, false));
+  }
+
+  function updateBulkDraft(index: number, field: keyof Omit<ReservationDraft, "id">, value: string) {
+    setBulkDrafts((current) =>
+      current.map((draft, draftIndex) => (draftIndex === index ? { ...draft, [field]: value } : draft)),
+    );
   }
 
   async function handleBulkReservationSubmit() {
-    if (!bulkHasRequiredColumns) {
-      setBulkMessage("请先指定物料名称、数量和单位所在列。");
-      return;
-    }
     if (bulkDrafts.length === 0) {
       setBulkMessage("请先识别粘贴内容。");
       return;
     }
     if (bulkErrorCount > 0) {
-      setBulkMessage("预览中仍有错误，请修正列含义或粘贴内容后再提交。");
+      setBulkMessage("预览中仍有错误，请修正列含义或单元格内容后再提交。");
       return;
     }
 
@@ -616,14 +710,7 @@ export default function Home() {
       const state = await requestJson<InventoryState>("/api/reservations", {
         method: "POST",
         body: JSON.stringify({
-          reservations: bulkValidDrafts.map((draft) => ({
-            requester: reservationForm.requester,
-            expectedDate: reservationForm.expectedDate,
-            sapNo: draft.sapNo,
-            materialName: draft.materialName,
-            quantity: draft.quantity,
-            unit: draft.unit,
-          })),
+          reservations: bulkValidDrafts.map(reservationPayloadFromDraft),
         }),
       });
       applyState(state);
@@ -926,23 +1013,100 @@ export default function Home() {
             <h2>从仓储领料预约</h2>
             <p>提交后进入预约清单，便于物料管理员提前安排本周领料。</p>
           </div>
-          <form className="form-grid" onSubmit={handleReservationSubmit}>
-            <TextInput label="预约人" value={reservationForm.requester} onChange={(requester) => setReservationForm({ ...reservationForm, requester })} />
-            <TextInput label="SAP号" value={reservationForm.sapNo} onChange={(sapNo) => setReservationForm({ ...reservationForm, sapNo })} placeholder="8位数字" pattern="[0-9]{8}" maxLength={8} />
-            <TextInput label="物料名称" value={reservationForm.materialName} onChange={(materialName) => setReservationForm({ ...reservationForm, materialName })} required />
-            <TextInput label="单位" value={reservationForm.unit} onChange={(unit) => setReservationForm({ ...reservationForm, unit })} placeholder="瓶 / 盒 / g" />
-            <TextInput label="数量" type="number" value={reservationForm.quantity} onChange={(quantity) => setReservationForm({ ...reservationForm, quantity })} required min="0" step="0.01" />
-            <label>
-              期望入库日期
-              <input
-                type="date"
-                value={reservationForm.expectedDate}
-                onChange={(event) => setReservationForm({ ...reservationForm, expectedDate: event.target.value })}
-              />
-              <small>{reservationForm.expectedDate ? formatWeekday(reservationForm.expectedDate) : ""}</small>
-            </label>
+          <form className="reservation-entry" onSubmit={handleReservationSubmit}>
+            <div className="table-wrap reservation-entry-wrap">
+              <table className="reservation-entry-table">
+                <thead>
+                  <tr>
+                    <th>预约人</th>
+                    <th>SAP号</th>
+                    <th>物料名称</th>
+                    <th>单位</th>
+                    <th>数量</th>
+                    <th>期望入库日期</th>
+                    <th>星期</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {manualReservations.map((draft, index) => {
+                    const errors = isEmptyReservationDraft(draft) ? [] : validateReservationDraft(draft);
+                    return (
+                      <tr key={draft.id}>
+                        <td>
+                          <input
+                            value={draft.requester}
+                            onChange={(event) => updateManualReservation(index, "requester", event.target.value)}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            value={draft.sapNo}
+                            onChange={(event) => updateManualReservation(index, "sapNo", event.target.value)}
+                            placeholder="8位数字"
+                            maxLength={8}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            value={draft.materialName}
+                            onChange={(event) => updateManualReservation(index, "materialName", event.target.value)}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            value={draft.unit}
+                            onChange={(event) => updateManualReservation(index, "unit", event.target.value)}
+                            placeholder="瓶 / 盒 / g"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            value={draft.quantity}
+                            onChange={(event) => updateManualReservation(index, "quantity", event.target.value)}
+                            min="0"
+                            step="0.01"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="date"
+                            value={draft.expectedDate}
+                            onChange={(event) => updateManualReservation(index, "expectedDate", event.target.value)}
+                          />
+                        </td>
+                        <td>{draft.expectedDate ? formatWeekday(draft.expectedDate) : "-"}</td>
+                        <td>
+                          <div className="table-actions">
+                            <button
+                              className="table-action table-action-danger"
+                              type="button"
+                              onClick={() => removeManualReservationRow(index)}
+                              disabled={isSubmitting}
+                            >
+                              删除
+                            </button>
+                          </div>
+                          {errors.length > 0 ? <small className="bulk-error">{errors.join("；")}</small> : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
             <div className="form-actions">
-              <button className="primary" type="submit" disabled={isSubmitting}>提交预约</button>
+              <button className="secondary" type="button" onClick={addManualReservationRow} disabled={isSubmitting}>
+                增行
+              </button>
+              <button
+                className="primary"
+                type="submit"
+                disabled={isSubmitting || manualActiveReservations.length === 0 || manualErrorCount > 0}
+              >
+                提交 {manualActiveReservations.length} 条预约
+              </button>
             </div>
           </form>
           <div className="bulk-import">
@@ -966,7 +1130,7 @@ export default function Home() {
                   setBulkPasteText(event.target.value);
                   setBulkMessage("");
                 }}
-                placeholder="SAP号	物料名称	数量	单位"
+                placeholder="预约人	SAP号	物料名称	单位	数量	期望入库日期"
               />
             </label>
             <div className="form-actions">
@@ -980,13 +1144,13 @@ export default function Home() {
             {bulkMessage ? <p className={bulkErrorCount > 0 ? "dialog-error" : "inline-note"}>{bulkMessage}</p> : null}
             {bulkRows.length > 0 ? (
               <>
-                <div className="table-wrap bulk-preview-wrap">
-                  <table className="bulk-preview-table">
+                <div className="table-wrap bulk-mapping-wrap">
+                  <table className="bulk-mapping-table">
                     <thead>
                       <tr>
-                        <th>行号</th>
                         {bulkColumnMapping.map((column, index) => (
                           <th key={`bulk-column-${index}`}>
+                            第 {index + 1} 列
                             <select
                               value={column}
                               onChange={(event) => updateBulkColumnMapping(index, event.target.value as BulkColumnKey)}
@@ -999,21 +1163,85 @@ export default function Home() {
                             </select>
                           </th>
                         ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        {bulkColumnMapping.map((_, columnIndex) => (
+                          <td key={`bulk-sample-${columnIndex}`}>
+                            {bulkRows[bulkHasHeader ? 1 : 0]?.[columnIndex] || "-"}
+                          </td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div className="table-wrap bulk-preview-wrap">
+                  <table className="bulk-preview-table reservation-entry-table">
+                    <thead>
+                      <tr>
+                        <th>行号</th>
+                        <th>预约人</th>
+                        <th>SAP号</th>
+                        <th>物料名称</th>
+                        <th>单位</th>
+                        <th>数量</th>
+                        <th>期望入库日期</th>
+                        <th>星期</th>
                         <th>识别状态</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {bulkRows.slice(bulkHasHeader ? 1 : 0).map((row, index) => {
-                        const draft = bulkDrafts[index];
+                      {bulkDrafts.map((draft, index) => {
+                        const errors = validateReservationDraft(draft);
                         return (
-                          <tr key={`bulk-row-${index}`}>
-                            <td>{draft?.rowNumber ?? index + 1}</td>
-                            {bulkColumnMapping.map((_, columnIndex) => (
-                              <td key={`bulk-cell-${index}-${columnIndex}`}>{row[columnIndex] || "-"}</td>
-                            ))}
+                          <tr key={draft.id}>
+                            <td>{draft.rowNumber}</td>
                             <td>
-                              {draft?.errors.length ? (
-                                <span className="bulk-error">{draft.errors.join("；")}</span>
+                              <input
+                                value={draft.requester}
+                                onChange={(event) => updateBulkDraft(index, "requester", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={draft.sapNo}
+                                onChange={(event) => updateBulkDraft(index, "sapNo", event.target.value)}
+                                maxLength={8}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={draft.materialName}
+                                onChange={(event) => updateBulkDraft(index, "materialName", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={draft.unit}
+                                onChange={(event) => updateBulkDraft(index, "unit", event.target.value)}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="number"
+                                value={draft.quantity}
+                                onChange={(event) => updateBulkDraft(index, "quantity", event.target.value)}
+                                min="0"
+                                step="0.01"
+                              />
+                            </td>
+                            <td>
+                              <input
+                                type="date"
+                                value={draft.expectedDate}
+                                onChange={(event) => updateBulkDraft(index, "expectedDate", event.target.value)}
+                              />
+                            </td>
+                            <td>{draft.expectedDate ? formatWeekday(draft.expectedDate) : "-"}</td>
+                            <td>
+                              {errors.length ? (
+                                <span className="bulk-error">{errors.join("；")}</span>
                               ) : (
                                 <span className="bulk-ok">可提交</span>
                               )}
@@ -1029,7 +1257,7 @@ export default function Home() {
                     className="primary"
                     type="button"
                     onClick={handleBulkReservationSubmit}
-                    disabled={isSubmitting || bulkDrafts.length === 0 || bulkErrorCount > 0 || !bulkHasRequiredColumns}
+                    disabled={isSubmitting || bulkDrafts.length === 0 || bulkErrorCount > 0}
                   >
                     提交 {bulkValidDrafts.length} 条预约
                   </button>

@@ -377,6 +377,38 @@ textarea:focus {
   color: var(--muted);
 }
 
+.reservation-entry {
+  display: grid;
+  gap: 12px;
+}
+
+.reservation-entry-wrap table,
+.bulk-preview-wrap table {
+  min-width: 1320px;
+}
+
+.reservation-entry-table th,
+.reservation-entry-table td {
+  padding: 8px;
+  vertical-align: middle;
+}
+
+.reservation-entry-table input {
+  min-height: 36px;
+  min-width: 120px;
+  padding: 7px 9px;
+}
+
+.reservation-entry-table th:nth-child(3),
+.reservation-entry-table td:nth-child(3) {
+  min-width: 240px;
+}
+
+.reservation-entry-table th:nth-child(6),
+.reservation-entry-table td:nth-child(6) {
+  min-width: 160px;
+}
+
 .bulk-import {
   display: grid;
   gap: 14px;
@@ -402,15 +434,18 @@ textarea:focus {
   font-weight: 700;
 }
 
-.bulk-preview-wrap table {
-  min-width: 980px;
+.bulk-mapping-wrap table {
+  min-width: 760px;
 }
 
+.bulk-mapping-table th,
+.bulk-mapping-table td,
 .bulk-preview-table th {
   vertical-align: middle;
 }
 
-.bulk-preview-table th select {
+.bulk-mapping-table th select {
+  margin-top: 6px;
   min-width: 130px;
 }
 
