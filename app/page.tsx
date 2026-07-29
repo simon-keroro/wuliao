@@ -307,6 +307,7 @@ export default function Home() {
   const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [materialToDelete, setMaterialToDelete] = useState<MaterialBatch | null>(null);
+  const [reservationToDelete, setReservationToDelete] = useState<ReservationRecord | null>(null);
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [manualReservations, setManualReservations] = useState<ReservationDraft[]>(() => [
     createReservationDraft({}, "manual-row-1"),
@@ -747,14 +748,16 @@ export default function Home() {
     }
   }
 
-  async function handleDeleteReservation(record: ReservationRecord) {
+  async function confirmDeleteReservation() {
+    if (!reservationToDelete) return;
     setIsSubmitting(true);
     try {
-      const state = await requestJson<InventoryState>(`/api/reservations?id=${encodeURIComponent(record.id)}`, {
+      const state = await requestJson<InventoryState>(`/api/reservations?id=${encodeURIComponent(reservationToDelete.id)}`, {
         method: "DELETE",
       });
       applyState(state);
-      setMessage(`${record.materialName} 的预约记录已删除。`);
+      setMessage(`${reservationToDelete.materialName} 的预约记录已删除。`);
+      setReservationToDelete(null);
       setActiveTab("reservationList");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "删除预约记录失败。");
@@ -1277,7 +1280,7 @@ export default function Home() {
           <ReservationsTable
             records={filteredReservations}
             onToggleReceipt={handleToggleReservationReceipt}
-            onDelete={handleDeleteReservation}
+            onDelete={setReservationToDelete}
             isSubmitting={isSubmitting}
           />
         </section>
@@ -1296,13 +1299,30 @@ export default function Home() {
       {materialToDelete ? (
         <div className="modal-backdrop" role="presentation">
           <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-material-title">
-            <h2 id="delete-material-title">请确认是否删除本物料</h2>
+            <h2 id="delete-material-title">是否确认删除</h2>
             <p>{materialToDelete.name}</p>
             <div className="dialog-actions">
               <button className="secondary" type="button" onClick={() => setMaterialToDelete(null)} disabled={isSubmitting}>
                 否
               </button>
               <button className="danger-action" type="button" onClick={confirmDeleteMaterial} disabled={isSubmitting}>
+                是
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {reservationToDelete ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-reservation-title">
+            <h2 id="delete-reservation-title">是否确认删除</h2>
+            <p>{reservationToDelete.materialName}</p>
+            <div className="dialog-actions">
+              <button className="secondary" type="button" onClick={() => setReservationToDelete(null)} disabled={isSubmitting}>
+                否
+              </button>
+              <button className="danger-action" type="button" onClick={confirmDeleteReservation} disabled={isSubmitting}>
                 是
               </button>
             </div>
