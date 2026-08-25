@@ -70,7 +70,7 @@ function normalizeSmtpPassword(host, password) {
 
 function getAppInfo() {
   const source = readFileSync(path.join(process.cwd(), "lib", "version.ts"), "utf8");
-  const title = source.match(/APP_TITLE\s*=\s*"([^"]+)"/)?.[1] ?? "科研开发部物料管理系统";
+  const title = source.match(/APP_TITLE\s*=\s*"([^"]+)"/)?.[1] ?? "研发物料管理系统";
   const version = source.match(/APP_VERSION\s*=\s*"([^"]+)"/)?.[1] ?? "UNKNOWN";
   return { title, version };
 }
