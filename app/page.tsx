@@ -408,20 +408,26 @@ export default function Home() {
 
   const filteredMaterials = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return materials.filter((batch) => {
-      const matchesKeyword =
-        !keyword ||
-        [batch.sapNo, batch.name, batch.category, batch.batchNo, batch.supplier, batch.storageLocation]
-          .join(" ")
-          .toLowerCase()
-          .includes(keyword);
-      const expiryStatus = getExpiryStatus(batch).key;
-      const stockStatus = getStockStatus(batch).key;
-      const matchesExpiry = expiryFilter === "all" || expiryStatus === expiryFilter;
-      const matchesStock = stockFilter === "all" || stockStatus === stockFilter;
-      const matchesZeroStockVisibility = showZeroStockMaterials || batch.remainingQuantity > 0;
-      return matchesKeyword && matchesExpiry && matchesStock && matchesZeroStockVisibility;
-    });
+    return materials
+      .filter((batch) => {
+        const matchesKeyword =
+          !keyword ||
+          [batch.sapNo, batch.name, batch.category, batch.batchNo, batch.supplier, batch.storageLocation]
+            .join(" ")
+            .toLowerCase()
+            .includes(keyword);
+        const expiryStatus = getExpiryStatus(batch).key;
+        const stockStatus = getStockStatus(batch).key;
+        const matchesExpiry = expiryFilter === "all" || expiryStatus === expiryFilter;
+        const matchesStock = stockFilter === "all" || stockStatus === stockFilter;
+        const matchesZeroStockVisibility = showZeroStockMaterials || batch.remainingQuantity > 0;
+        return matchesKeyword && matchesExpiry && matchesStock && matchesZeroStockVisibility;
+      })
+      .sort((a, b) => {
+        const receivedDateCompare = b.receivedDate.localeCompare(a.receivedDate);
+        if (receivedDateCompare !== 0) return receivedDateCompare;
+        return b.createdAt.localeCompare(a.createdAt);
+      });
   }, [materials, query, expiryFilter, stockFilter, showZeroStockMaterials]);
 
   const filteredUsage = useMemo(() => {
