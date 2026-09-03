@@ -377,6 +377,10 @@ textarea:focus {
   color: var(--muted);
 }
 
+.dialog-preview {
+  margin-top: 14px;
+}
+
 .reservation-entry {
   display: grid;
   gap: 12px;

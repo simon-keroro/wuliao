@@ -307,8 +307,11 @@ export default function Home() {
   const [materialForm, setMaterialForm] = useState(() => ({ ...emptyMaterial, receivedDate: getTodayDate() }));
   const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [materialToDelete, setMaterialToDelete] = useState<MaterialBatch | null>(null);
+  const [materialToUse, setMaterialToUse] = useState<MaterialBatch | null>(null);
   const [reservationToDelete, setReservationToDelete] = useState<ReservationRecord | null>(null);
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
+  const [quickUsageForm, setQuickUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
+  const [usageMaterialQuery, setUsageMaterialQuery] = useState("");
   const [manualReservations, setManualReservations] = useState<ReservationDraft[]>(() => [
     createReservationDraft({}, "manual-row-1"),
   ]);
@@ -375,6 +378,24 @@ export default function Home() {
 
   const selectedBatch = materials.find((batch) => batch.id === usageForm.materialBatchId);
   const isEditingMaterial = Boolean(editingMaterialId);
+  const usageMaterialKeyword = usageMaterialQuery.trim().toLowerCase();
+
+  const searchableUsageMaterials = useMemo(() => {
+    if (!usageMaterialKeyword) return usableMaterials;
+    return usableMaterials.filter((batch) =>
+      [batch.sapNo, batch.name, batch.batchNo, batch.supplier, batch.storageLocation]
+        .join(" ")
+        .toLowerCase()
+        .includes(usageMaterialKeyword),
+    );
+  }, [usableMaterials, usageMaterialKeyword]);
+
+  const usageSelectMaterials = useMemo(() => {
+    if (!selectedBatch || searchableUsageMaterials.some((batch) => batch.id === selectedBatch.id)) {
+      return searchableUsageMaterials;
+    }
+    return [selectedBatch, ...searchableUsageMaterials];
+  }, [searchableUsageMaterials, selectedBatch]);
 
   const stats = useMemo(() => {
     return {
@@ -574,10 +595,48 @@ export default function Home() {
       });
       applyState(state);
       setUsageForm({ ...emptyUsage, usedDate: getTodayDate() });
+      setUsageMaterialQuery("");
       setMessage("领用登记成功，剩余库存已同步扣减。");
       setActiveTab("inventory");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "领用登记失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function openQuickUsage(batch: MaterialBatch) {
+    setMaterialToUse(batch);
+    setQuickUsageForm({
+      ...emptyUsage,
+      materialBatchId: batch.id,
+      usedDate: getTodayDate(),
+    });
+  }
+
+  function closeQuickUsage() {
+    if (isSubmitting) return;
+    setMaterialToUse(null);
+    setQuickUsageForm({ ...emptyUsage, usedDate: getTodayDate() });
+  }
+
+  async function handleQuickUsageSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!materialToUse) return;
+
+    setIsSubmitting(true);
+    try {
+      const state = await requestJson<InventoryState>("/api/usage-records", {
+        method: "POST",
+        body: JSON.stringify(quickUsageForm),
+      });
+      applyState(state);
+      setMessage(`${materialToUse.name} 领用登记成功，库存已同步扣减。`);
+      setMaterialToUse(null);
+      setQuickUsageForm({ ...emptyUsage, usedDate: getTodayDate() });
+      setActiveTab("inventory");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "快速领料失败。");
     } finally {
       setIsSubmitting(false);
     }
@@ -926,7 +985,12 @@ export default function Home() {
             <h2>库存总览</h2>
             <button className="primary" onClick={startNewMaterial}>新增入库</button>
           </div>
-          <InventoryTable materials={filteredMaterials} onEdit={startEditMaterial} onDelete={setMaterialToDelete} />
+          <InventoryTable
+            materials={filteredMaterials}
+            onEdit={startEditMaterial}
+            onUse={openQuickUsage}
+            onDelete={setMaterialToDelete}
+          />
         </section>
       )}
 
@@ -972,6 +1036,14 @@ export default function Home() {
           </div>
           <form className="form-grid" onSubmit={handleUsageSubmit}>
             <label className="wide">
+              搜索物料
+              <input
+                value={usageMaterialQuery}
+                onChange={(event) => setUsageMaterialQuery(event.target.value)}
+                placeholder="输入SAP号、物料名称、批号、供应商或位置"
+              />
+            </label>
+            <label className="wide">
               物料批次
               <select
                 value={usageForm.materialBatchId}
@@ -979,12 +1051,13 @@ export default function Home() {
                 required
               >
                 <option value="">请选择可领用批次</option>
-                {usableMaterials.map((batch) => (
+                {usageSelectMaterials.map((batch) => (
                   <option key={batch.id} value={batch.id}>
                     {batch.sapNo} / {batch.name} / {batch.batchNo} / 剩余 {batch.remainingQuantity} {batch.unit} / 有效期 {batch.expiryDate}
                   </option>
                 ))}
               </select>
+              {usageMaterialQuery ? <small>匹配 {searchableUsageMaterials.length} 个可领用批次</small> : null}
             </label>
             <TextInput label="领用人" value={usageForm.userName} onChange={(userName) => setUsageForm({ ...usageForm, userName })} required />
             <TextInput label="领用日期" type="date" value={usageForm.usedDate} onChange={(usedDate) => setUsageForm({ ...usageForm, usedDate })} required />
@@ -1296,6 +1369,62 @@ export default function Home() {
         </section>
       )}
 
+      {materialToUse ? (
+        <div className="modal-backdrop" role="presentation">
+          <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="quick-usage-title">
+            <h2 id="quick-usage-title">快速领料</h2>
+            <div className="batch-preview dialog-preview">
+              <strong>{materialToUse.name}</strong>
+              <span>SAP号 {materialToUse.sapNo || "-"}</span>
+              <span>批号 {materialToUse.batchNo || "-"}</span>
+              <span>当前可用 {materialToUse.remainingQuantity} {materialToUse.unit}</span>
+            </div>
+            <form className="dialog-form" onSubmit={handleQuickUsageSubmit}>
+              <label>
+                领料人
+                <input
+                  value={quickUsageForm.userName}
+                  onChange={(event) => setQuickUsageForm({ ...quickUsageForm, userName: event.target.value })}
+                  autoFocus
+                  required
+                  disabled={isSubmitting}
+                />
+              </label>
+              <label>
+                领用量
+                <input
+                  type="number"
+                  value={quickUsageForm.usedQuantity}
+                  onChange={(event) => setQuickUsageForm({ ...quickUsageForm, usedQuantity: event.target.value })}
+                  min="0"
+                  step="0.01"
+                  required
+                  disabled={isSubmitting}
+                />
+              </label>
+              <label>
+                领用日期
+                <input
+                  type="date"
+                  value={quickUsageForm.usedDate}
+                  onChange={(event) => setQuickUsageForm({ ...quickUsageForm, usedDate: event.target.value })}
+                  required
+                  disabled={isSubmitting}
+                />
+              </label>
+              <div className="dialog-actions">
+                <button className="secondary" type="button" onClick={closeQuickUsage} disabled={isSubmitting}>
+                  取消
+                </button>
+                <button className="primary" type="submit" disabled={isSubmitting}>
+                  确认领料
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      ) : null}
+
       {materialToDelete ? (
         <div className="modal-backdrop" role="presentation">
           <section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-material-title">
@@ -1435,10 +1564,12 @@ function TextInput({
 function InventoryTable({
   materials,
   onEdit,
+  onUse,
   onDelete,
 }: {
   materials: MaterialBatch[];
   onEdit: (batch: MaterialBatch) => void;
+  onUse: (batch: MaterialBatch) => void;
   onDelete: (batch: MaterialBatch) => void;
 }) {
   return (
@@ -1488,6 +1619,14 @@ function InventoryTable({
                 <td>
                   <div className="table-actions">
                     <button className="table-action" type="button" onClick={() => onEdit(batch)}>编辑</button>
+                    <button
+                      className="table-action"
+                      type="button"
+                      onClick={() => onUse(batch)}
+                      disabled={batch.remainingQuantity <= 0 || getExpiryStatus(batch).key === "expired"}
+                    >
+                      领料
+                    </button>
                     <button className="table-action table-action-danger" type="button" onClick={() => onDelete(batch)}>
                       删除
                     </button>
