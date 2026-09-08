@@ -54,7 +54,7 @@ input:disabled {
 .app-shell {
   width: min(1440px, 100%);
   margin: 0 auto;
-  padding: 28px;
+  padding: 16px 24px 24px;
 }
 
 .auth-shell {
@@ -80,17 +80,11 @@ input:disabled {
 
 .topbar {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
   justify-content: space-between;
-  gap: 24px;
-  padding: 16px 0 22px;
-}
-
-.eyebrow {
-  margin: 0 0 8px;
-  color: var(--primary);
-  font-size: 13px;
-  font-weight: 700;
+  gap: 12px 20px;
+  padding: 8px 0 14px;
 }
 
 h1,
@@ -101,9 +95,25 @@ p {
 }
 
 h1 {
-  font-size: clamp(30px, 4vw, 48px);
-  line-height: 1.08;
+  font-size: 28px;
+  line-height: 1.35;
   letter-spacing: 0;
+}
+
+.app-title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-version {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
 }
 
 h2 {
@@ -127,7 +137,68 @@ h3 {
 
 .top-actions {
   flex-wrap: wrap;
+  gap: 6px;
   justify-content: flex-end;
+}
+
+.top-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.top-action svg {
+  flex: none;
+}
+
+.top-action:hover:not(:disabled) {
+  background: #edf3f1;
+  border-color: #a9c4ba;
+}
+
+.top-action-backup {
+  color: var(--primary);
+  border-color: #b8d0c7;
+  background: #eef6f2;
+}
+
+.backup-action-label {
+  min-width: 5em;
+}
+
+.top-action-quiet {
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.top-action:focus-visible,
+.display-table-wrap:focus-visible,
+.display-table button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.icon-spin {
+  animation: icon-spin 1s linear infinite;
+}
+
+@keyframes icon-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-spin { animation: none; }
 }
 
 .primary,
@@ -164,34 +235,36 @@ h3 {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin: 6px 0 14px;
+  gap: 0;
+  margin: 0 0 12px;
+  border-block: 1px solid var(--line);
 }
 
 .stat {
   display: flex;
-  min-height: 78px;
+  min-height: 54px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  padding: 12px 14px;
-  box-shadow: var(--shadow);
+  padding: 10px 16px;
+}
+
+.stat + .stat {
+  border-left: 1px solid var(--line);
 }
 
 .stat span {
   display: block;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .stat strong {
   display: block;
   margin-top: 0;
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat.warning strong {
@@ -271,8 +344,13 @@ h3 {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(150px, 180px));
   gap: 12px;
-  margin-bottom: 16px;
-  padding: 14px;
+  margin-bottom: 12px;
+  padding: 0 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .checkbox-field {
@@ -295,6 +373,22 @@ h3 {
 
 .panel {
   padding: 18px;
+}
+
+.panel.display-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+.display-panel .panel-heading {
+  margin-bottom: 10px;
+}
+
+.display-panel h2 {
+  font-size: 20px;
 }
 
 .panel-heading {
@@ -535,6 +629,137 @@ td strong {
   color: #5b625d;
 }
 
+/* Isolate sticky sizing and layering from editable reservation tables. */
+.display-table-wrap {
+  --sap-width: 104px;
+  --material-width: 184px;
+  --actions-width: 204px;
+  max-height: 65vh;
+  overflow: auto;
+  position: relative;
+  isolation: isolate;
+  background: var(--surface);
+  border-block: 1px solid var(--line);
+  scrollbar-width: thin;
+}
+
+.display-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  min-width: 1360px;
+}
+
+.display-table .sap-column { width: var(--sap-width); }
+.display-table .material-column { width: var(--material-width); }
+.display-table .actions-column { width: var(--actions-width); }
+.display-table .date-column { width: 128px; }
+.display-table .timestamp-column { width: 156px; }
+.display-table .quantity-column { width: 88px; }
+.display-table .inventory-quantity-column { width: 148px; }
+.display-table .status-column { width: 136px; }
+.display-table .unit-column { width: 64px; }
+
+.records-table { min-width: 1100px; }
+.reservations-table {
+  --actions-width: 268px;
+  min-width: 1260px;
+}
+
+.display-table th,
+.display-table td {
+  padding: 10px;
+  vertical-align: middle;
+  border-bottom: 1px solid #e8ece9;
+  overflow-wrap: anywhere;
+}
+
+.display-table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #eef2f1;
+  box-shadow: inset 0 -1px var(--line);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.display-table td {
+  background: var(--surface);
+}
+
+.display-table tbody tr:hover td {
+  background: #f2f7f5;
+}
+
+.display-table .sticky-sap,
+.display-table .sticky-material,
+.display-table .sticky-actions {
+  position: sticky;
+  z-index: 2;
+}
+
+.display-table .sticky-sap { left: 0; }
+.display-table .sticky-material {
+  left: var(--sap-width);
+  border-right: 1px solid var(--line);
+}
+.display-table .sticky-actions {
+  right: 0;
+  border-left: 1px solid var(--line);
+}
+
+.display-table thead .sticky-sap,
+.display-table thead .sticky-material,
+.display-table thead .sticky-actions { z-index: 4; }
+
+.display-table .sap-cell,
+.display-table .date-cell,
+.display-table .numeric-cell {
+  font-variant-numeric: tabular-nums;
+}
+
+.display-table .sap-cell { white-space: nowrap; }
+.display-table .date-cell { white-space: nowrap; }
+.display-table .numeric-cell { text-align: right; }
+.display-table .inventory-quantity strong { font-size: 17px; }
+.display-table .quantity-unit {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.display-table small { font-size: 13px; }
+.display-table .badge {
+  min-height: 24px;
+  padding: 2px 8px;
+  margin: 2px 4px 2px 0;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.display-table .badge.success {
+  background: #f0f4f1;
+  color: #526d5c;
+}
+
+.display-table .table-actions {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.display-table .table-action {
+  min-height: 32px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.display-table .receipt-time {
+  margin-top: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -680,12 +905,53 @@ small {
   .tab-request {
     margin-left: 0;
   }
+
+  .display-table-wrap {
+    --sap-width: 92px;
+    --actions-width: 120px;
+  }
+
+  .reservations-table { --actions-width: 120px; }
+
+  .display-table .sticky-material {
+    position: static;
+    border-right: 0;
+  }
+
+  .display-table thead .sticky-material {
+    position: sticky;
+    left: auto;
+    z-index: 3;
+  }
+
+  .display-table .sticky-sap { border-right: 1px solid var(--line); }
+
+  .display-table .sticky-actions { padding-inline: 6px; }
+
+  .display-table .table-actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .display-table .table-action { width: 100%; }
 }
 
 @media (max-width: 560px) {
   .app-shell {
     padding: 14px;
   }
+
+  .app-title { font-size: 22px; }
+
+  .topbar { gap: 10px; }
+
+  .top-actions {
+    display: grid;
+    grid-template-columns: repeat(3, max-content);
+    gap: 6px;
+  }
+
+  .top-action { padding-inline: 7px; }
 
   .form-grid {
     grid-template-columns: 1fr;
@@ -700,9 +966,12 @@ small {
   }
 
   .stat {
-    min-height: 66px;
-    padding: 10px 12px;
+    min-height: 46px;
+    padding: 8px 12px;
   }
+
+  .stat:nth-child(3) { border-left: 0; }
+  .stat:nth-child(n + 3) { border-top: 1px solid var(--line); }
 
   .panel {
     padding: 14px;

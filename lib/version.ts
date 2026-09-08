@@ -1,3 +1,3 @@
 export const APP_TITLE = "研发物料管理系统";
-export const APP_VERSION = "V24";
+export const APP_VERSION = "V25";
 export const APP_DISPLAY_TITLE = `${APP_TITLE} ${APP_VERSION}`;

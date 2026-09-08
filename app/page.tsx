@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { DatabaseBackup, Download, LoaderCircle, LogOut, RefreshCw } from "lucide-react";
 import type { InventoryState, MaterialBatch, ReservationRecord, UsageRecord } from "@/lib/materials";
-import { APP_DISPLAY_TITLE } from "@/lib/version";
+import { APP_TITLE, APP_VERSION } from "@/lib/version";
 
 type Tab = "inventory" | "intake" | "usage" | "records" | "warehouseRequest" | "reservationList";
 type ExpiryFilter = "all" | "normal" | "soon" | "expired";
@@ -90,6 +91,30 @@ function daysUntil(dateValue: string) {
 function formatWeekday(dateValue: string) {
   if (!dateValue) return "";
   return new Intl.DateTimeFormat("zh-CN", { weekday: "long" }).format(new Date(`${dateValue}T00:00:00`));
+}
+
+function displayDate(value: string) {
+  if (!value) return "—";
+  const match = value.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  return match ? `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}` : value;
+}
+
+const shanghaiDateTime = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+function displayTimestamp(value: string) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const parts = Object.fromEntries(shanghaiDateTime.formatToParts(date).map(({ type, value }) => [type, value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
 function normalizeCell(value: string) {
@@ -914,8 +939,7 @@ export default function Home() {
     return (
       <main className="app-shell auth-shell">
         <section className="auth-panel">
-          <p className="eyebrow">科研物料管理</p>
-          <h1>{APP_DISPLAY_TITLE}</h1>
+          <AppTitle />
           <form className="auth-form" onSubmit={handleLoginSubmit}>
             <label>
               试用密码
@@ -941,24 +965,26 @@ export default function Home() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
-          <p className="eyebrow">科研物料管理</p>
-          <h1>{APP_DISPLAY_TITLE}</h1>
-        </div>
+        <AppTitle />
         <div className="top-actions">
-          <button className="secondary" onClick={() => exportCsv("库存总览.csv", materials.map(formatMaterialExport))}>
+          <button className="top-action" onClick={() => exportCsv("库存总览.csv", materials.map(formatMaterialExport))}>
+            <Download size={16} aria-hidden="true" />
             导出库存
           </button>
-          <button className="secondary" onClick={openBackupDialog} disabled={isBackingUp || isSubmitting}>
-            {isBackingUp ? "正在备份" : "备份数据库"}
+          <button className="top-action top-action-backup" onClick={openBackupDialog} disabled={isBackingUp || isSubmitting} aria-busy={isBackingUp}>
+            {isBackingUp ? <LoaderCircle size={16} className="icon-spin" aria-hidden="true" /> : <DatabaseBackup size={16} aria-hidden="true" />}
+            <span className="backup-action-label">{isBackingUp ? "正在备份" : "备份数据库"}</span>
           </button>
-          <button className="secondary" onClick={() => exportCsv("领用记录.csv", usageRecords.map(formatUsageExport))}>
+          <button className="top-action" onClick={() => exportCsv("领用记录.csv", usageRecords.map(formatUsageExport))}>
+            <Download size={16} aria-hidden="true" />
             导出流水
           </button>
-          <button className="secondary" onClick={loadState} disabled={isSubmitting || isLoading}>
+          <button className="top-action top-action-quiet" onClick={loadState} disabled={isSubmitting || isLoading} aria-busy={isLoading}>
+            <RefreshCw size={16} className={isLoading ? "icon-spin" : undefined} aria-hidden="true" />
             刷新
           </button>
-          <button className="secondary" onClick={handleLogout} disabled={isSubmitting}>
+          <button className="top-action top-action-quiet" onClick={handleLogout} disabled={isSubmitting}>
+            <LogOut size={16} aria-hidden="true" />
             退出
           </button>
         </div>
@@ -1048,7 +1074,7 @@ export default function Home() {
       )}
 
       {activeTab === "inventory" && (
-        <section className="panel">
+        <section className="panel display-panel">
           <div className="panel-heading">
             <h2>库存总览</h2>
             <button className="primary" onClick={startNewMaterial}>新增入库</button>
@@ -1413,7 +1439,7 @@ export default function Home() {
       )}
 
       {activeTab === "reservationList" && (
-        <section className="panel">
+        <section className="panel display-panel">
           <div className="panel-heading">
             <h2>预约清单</h2>
             <button className="secondary" onClick={() => exportCsv("仓储领料预约清单.csv", filteredReservations.map(formatReservationExport))}>导出Excel</button>
@@ -1429,7 +1455,7 @@ export default function Home() {
       )}
 
       {activeTab === "records" && (
-        <section className="panel">
+        <section className="panel display-panel">
           <div className="panel-heading">
             <h2>领用流水</h2>
             <button className="secondary" onClick={() => exportCsv("领用记录.csv", usageRecords.map(formatUsageExport))}>导出流水</button>
@@ -1648,6 +1674,10 @@ export default function Home() {
   );
 }
 
+function AppTitle() {
+  return <h1 className="app-title">{APP_TITLE}<span className="app-version">{APP_VERSION}</span></h1>;
+}
+
 function Stat({ label, value, tone = "default" }: { label: string; value: number; tone?: string }) {
   return (
     <article className={`stat ${tone}`}>
@@ -1729,20 +1759,26 @@ function InventoryTable({
   onDelete: (batch: MaterialBatch) => void;
 }) {
   return (
-    <div className="table-wrap">
-      <table>
+    <div className="table-wrap display-table-wrap" role="region" aria-label="库存总览表格" tabIndex={0}>
+      <table className="display-table inventory-table">
+        <colgroup>
+          <col className="sap-column" /><col className="material-column" />
+          <col /><col /><col /><col />
+          <col className="date-column" /><col className="inventory-quantity-column" />
+          <col className="status-column" /><col className="actions-column" />
+        </colgroup>
         <thead>
           <tr>
-            <th>SAP号</th>
-            <th>物料</th>
-            <th>分类</th>
-            <th>规格</th>
-            <th>批号</th>
-            <th>供应商</th>
-            <th>入库 / 有效期</th>
-            <th>库存</th>
-            <th>状态</th>
-            <th>操作</th>
+            <th scope="col" className="sticky-sap">SAP号</th>
+            <th scope="col" className="sticky-material">物料</th>
+            <th scope="col">分类</th>
+            <th scope="col">规格</th>
+            <th scope="col">批号</th>
+            <th scope="col">供应商</th>
+            <th scope="col">入库 / 有效期</th>
+            <th scope="col" className="numeric-cell">库存</th>
+            <th scope="col">状态</th>
+            <th scope="col" className="sticky-actions">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -1751,8 +1787,8 @@ function InventoryTable({
             const stock = getStockStatus(batch);
             return (
               <tr key={batch.id}>
-                <td><strong>{batch.sapNo || "-"}</strong></td>
-                <td>
+                <td className="sticky-sap sap-cell">{batch.sapNo || "—"}</td>
+                <td className="sticky-material">
                   <strong>{batch.name}</strong>
                   <small>{batch.storageLocation || "未填写位置"}</small>
                 </td>
@@ -1760,19 +1796,19 @@ function InventoryTable({
                 <td>{batch.specification || "-"}</td>
                 <td>{batch.batchNo}</td>
                 <td>{batch.supplier || "-"}</td>
-                <td>
-                  <span>{batch.receivedDate}</span>
-                  <small>{batch.expiryDate}</small>
+                <td className="date-cell">
+                  <span>{displayDate(batch.receivedDate)}</span>
+                  <small>{displayDate(batch.expiryDate)}</small>
                 </td>
-                <td>
-                  <strong>{batch.remainingQuantity} {batch.unit}</strong>
+                <td className="numeric-cell inventory-quantity">
+                  <strong>{batch.remainingQuantity} <span className="quantity-unit">{batch.unit}</span></strong>
                   <small>初始 {batch.initialQuantity} / 下限 {batch.minQuantity}</small>
                 </td>
                 <td>
                   <Badge tone={expiry.tone}>{expiry.label}</Badge>
                   <Badge tone={stock.tone}>{stock.label}</Badge>
                 </td>
-                <td>
+                <td className="sticky-actions">
                   <div className="table-actions">
                     <button className="table-action" type="button" onClick={() => onEdit(batch)}>编辑</button>
                     <button
@@ -1800,29 +1836,33 @@ function InventoryTable({
 
 function RecordsTable({ records }: { records: UsageRecord[] }) {
   return (
-    <div className="table-wrap">
-      <table>
+    <div className="table-wrap display-table-wrap" role="region" aria-label="领用流水表格" tabIndex={0}>
+      <table className="display-table records-table">
+        <colgroup>
+          <col className="sap-column" /><col className="material-column" />
+          <col className="date-column" /><col /><col /><col className="quantity-column" /><col /><col />
+        </colgroup>
         <thead>
           <tr>
-            <th>领用日期</th>
-            <th>SAP号</th>
-            <th>物料</th>
-            <th>批号</th>
-            <th>领用人</th>
-            <th>领用量</th>
-            <th>用途 / 项目</th>
-            <th>备注</th>
+            <th scope="col" className="sticky-sap">SAP号</th>
+            <th scope="col" className="sticky-material">物料</th>
+            <th scope="col">领用日期</th>
+            <th scope="col">批号</th>
+            <th scope="col">领用人</th>
+            <th scope="col" className="numeric-cell">领用量</th>
+            <th scope="col">用途 / 项目</th>
+            <th scope="col">备注</th>
           </tr>
         </thead>
         <tbody>
           {records.map((record) => (
             <tr key={record.id}>
-              <td>{record.usedDate}</td>
-              <td>{record.sapNo || "-"}</td>
-              <td><strong>{record.materialName}</strong></td>
+              <td className="sticky-sap sap-cell">{record.sapNo || "—"}</td>
+              <td className="sticky-material"><strong>{record.materialName}</strong></td>
+              <td className="date-cell">{displayDate(record.usedDate)}</td>
               <td>{record.batchNo}</td>
               <td>{record.userName}</td>
-              <td>{record.usedQuantity}</td>
+              <td className="numeric-cell">{record.usedQuantity}</td>
               <td>{record.purpose || "-"}</td>
               <td>{record.notes || "-"}</td>
             </tr>
@@ -1848,19 +1888,25 @@ function ReservationsTable({
   isSubmitting: boolean;
 }) {
   return (
-    <div className="table-wrap">
-      <table>
+    <div className="table-wrap display-table-wrap" role="region" aria-label="预约清单表格" tabIndex={0}>
+      <table className="display-table reservations-table">
+        <colgroup>
+          <col className="sap-column" /><col className="material-column" />
+          <col className="date-column" /><col /><col />
+          <col className="quantity-column" /><col className="unit-column" />
+          <col className="timestamp-column" /><col className="actions-column" />
+        </colgroup>
         <thead>
           <tr>
-            <th>期望入库日期</th>
-            <th>星期</th>
-            <th>预约人</th>
-            <th>SAP号</th>
-            <th>物料名称</th>
-            <th>数量</th>
-            <th>单位</th>
-            <th>提交时间</th>
-            <th>操作</th>
+            <th scope="col" className="sticky-sap">SAP号</th>
+            <th scope="col" className="sticky-material">物料名称</th>
+            <th scope="col">期望入库日期</th>
+            <th scope="col">星期</th>
+            <th scope="col">预约人</th>
+            <th scope="col" className="numeric-cell">数量</th>
+            <th scope="col">单位</th>
+            <th scope="col">提交时间</th>
+            <th scope="col" className="sticky-actions">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -1868,15 +1914,15 @@ function ReservationsTable({
             const isReceived = Boolean(record.receivedAt);
             return (
               <tr key={record.id}>
-                <td>{record.expectedDate}</td>
+                <td className="sticky-sap sap-cell">{record.sapNo || "—"}</td>
+                <td className="sticky-material"><strong>{record.materialName}</strong></td>
+                <td className="date-cell">{displayDate(record.expectedDate)}</td>
                 <td>{formatWeekday(record.expectedDate)}</td>
                 <td>{record.requester}</td>
-                <td><strong>{record.sapNo}</strong></td>
-                <td>{record.materialName}</td>
-                <td>{record.quantity}</td>
+                <td className="numeric-cell">{record.quantity}</td>
                 <td>{record.unit}</td>
-                <td>{record.createdAt.slice(0, 10)}</td>
-                <td>
+                <td className="date-cell">{displayTimestamp(record.createdAt)}</td>
+                <td className="sticky-actions">
                   <div className="table-actions">
                     <button
                       className={`table-action ${isReceived ? "table-action-muted" : ""}`}
@@ -1903,7 +1949,7 @@ function ReservationsTable({
                       删除
                     </button>
                   </div>
-                  {isReceived ? <small>{record.receivedAt.slice(0, 10)}</small> : null}
+                  {isReceived ? <small className="receipt-time">{displayTimestamp(record.receivedAt)}</small> : null}
                 </td>
               </tr>
             );
