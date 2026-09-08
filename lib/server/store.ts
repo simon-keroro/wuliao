@@ -11,6 +11,7 @@ import {
   type MaterialUpdateInput,
   type ReservationInput,
   type ReservationRecord,
+  type ReservationUpdateInput,
   type UsageInput,
   type UsageRecord,
 } from "@/lib/materials";
@@ -617,6 +618,37 @@ export function createReservations(inputs: ReservationInput[]): InventoryState {
     db.exec("ROLLBACK;");
     throw error;
   }
+
+  return getInventoryState();
+}
+
+export function updateReservation(input: ReservationUpdateInput): InventoryState {
+  const db = getDatabase();
+  const id = requiredText(input.id);
+  if (!id) throw new Error("缺少要编辑的预约记录。");
+
+  const current = db.prepare("SELECT * FROM reservation_records WHERE id = ?").get(id) as ReservationRow | undefined;
+  if (!current) throw new Error("所选预约记录不存在，请刷新页面后重试。");
+
+  const reservation = validateReservationInput(input);
+  const result = db
+    .prepare(
+      `
+        UPDATE reservation_records
+        SET requester = ?, sap_no = ?, material_name = ?, unit = ?, quantity = ?, expected_date = ?
+        WHERE id = ?
+      `,
+    )
+    .run(
+      reservation.requester,
+      reservation.sapNo,
+      reservation.materialName,
+      reservation.unit,
+      reservation.quantity,
+      reservation.expectedDate,
+      id,
+    );
+  if (result.changes === 0) throw new Error("所选预约记录不存在，请刷新页面后重试。");
 
   return getInventoryState();
 }

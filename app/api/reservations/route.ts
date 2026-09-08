@@ -6,6 +6,7 @@ import {
   deleteReservation,
   receiveReservation,
   undoReceiveReservation,
+  updateReservation,
 } from "@/lib/server/store";
 
 export const dynamic = "force-dynamic";
@@ -30,12 +31,15 @@ export async function PATCH(request: Request) {
   if (unauthorized) return unauthorized;
 
   try {
-    const payload = (await request.json()) as { id?: string; action?: string };
+    const payload = (await request.json()) as ReservationInput & { id?: string; action?: string };
     if (payload.action === "receive") {
       return Response.json(receiveReservation(payload.id ?? ""));
     }
     if (payload.action === "undoReceive") {
       return Response.json(undoReceiveReservation(payload.id ?? ""));
+    }
+    if (payload.action === "update") {
+      return Response.json(updateReservation(payload));
     }
     throw new Error("不支持的预约操作。");
   } catch (error) {

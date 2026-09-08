@@ -309,6 +309,11 @@ export default function Home() {
   const [materialToDelete, setMaterialToDelete] = useState<MaterialBatch | null>(null);
   const [materialToUse, setMaterialToUse] = useState<MaterialBatch | null>(null);
   const [reservationToDelete, setReservationToDelete] = useState<ReservationRecord | null>(null);
+  const [reservationToEdit, setReservationToEdit] = useState<ReservationRecord | null>(null);
+  const [reservationEditForm, setReservationEditForm] = useState<ReservationDraft>(() =>
+    createReservationDraft({}, "reservation-edit"),
+  );
+  const [reservationEditMessage, setReservationEditMessage] = useState("");
   const [usageForm, setUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [quickUsageForm, setQuickUsageForm] = useState(() => ({ ...emptyUsage, usedDate: getTodayDate() }));
   const [usageMaterialQuery, setUsageMaterialQuery] = useState("");
@@ -456,8 +461,6 @@ export default function Home() {
       })
       .sort((a, b) => {
         const direction = reservationSort === "newest" ? -1 : 1;
-        const dateCompare = a.expectedDate.localeCompare(b.expectedDate);
-        if (dateCompare !== 0) return dateCompare * direction;
         return a.createdAt.localeCompare(b.createdAt) * direction;
       });
   }, [reservationRecords, query, reservationSort, hideReceivedReservations]);
@@ -808,6 +811,65 @@ export default function Home() {
       setActiveTab("reservationList");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : isReceived ? "撤销入研发库失败。" : "确认领取失败。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function startEditReservation(record: ReservationRecord) {
+    setReservationToEdit(record);
+    setReservationEditMessage("");
+    setReservationEditForm(
+      createReservationDraft(
+        {
+          requester: record.requester,
+          sapNo: record.sapNo,
+          materialName: record.materialName,
+          unit: record.unit,
+          quantity: String(record.quantity),
+          expectedDate: record.expectedDate,
+        },
+        record.id,
+      ),
+    );
+  }
+
+  function closeEditReservation() {
+    if (isSubmitting) return;
+    setReservationToEdit(null);
+    setReservationEditForm(createReservationDraft({}, "reservation-edit"));
+    setReservationEditMessage("");
+  }
+
+  async function handleEditReservationSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!reservationToEdit) return;
+
+    const errors = validateReservationDraft(reservationEditForm);
+    if (errors.length > 0) {
+      setReservationEditMessage(`请检查预约编辑内容：${errors.join("；")}。`);
+      return;
+    }
+
+    setIsSubmitting(true);
+    setReservationEditMessage("");
+    try {
+      const state = await requestJson<InventoryState>("/api/reservations", {
+        method: "PATCH",
+        body: JSON.stringify({
+          action: "update",
+          id: reservationToEdit.id,
+          ...reservationPayloadFromDraft(reservationEditForm),
+        }),
+      });
+      applyState(state);
+      setMessage(`${reservationEditForm.materialName} 的预约记录已更新。`);
+      setReservationToEdit(null);
+      setReservationEditForm(createReservationDraft({}, "reservation-edit"));
+      setReservationEditMessage("");
+      setActiveTab("reservationList");
+    } catch (error) {
+      setReservationEditMessage(error instanceof Error ? error.message : "编辑预约记录失败。");
     } finally {
       setIsSubmitting(false);
     }
@@ -1359,6 +1421,7 @@ export default function Home() {
           <ReservationsTable
             records={filteredReservations}
             onToggleReceipt={handleToggleReservationReceipt}
+            onEdit={startEditReservation}
             onDelete={setReservationToDelete}
             isSubmitting={isSubmitting}
           />
@@ -1461,6 +1524,93 @@ export default function Home() {
                 是
               </button>
             </div>
+          </section>
+        </div>
+      ) : null}
+
+      {reservationToEdit ? (
+        <div className="modal-backdrop" role="presentation">
+          <section
+            className="confirm-dialog reservation-edit-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-reservation-title"
+          >
+            <h2 id="edit-reservation-title">编辑预约记录</h2>
+            {reservationToEdit.receivedAt ? (
+              <p>该预约已入研发库，本次只修改预约清单记录，不同步修改库存总览。</p>
+            ) : null}
+            <form className="dialog-form reservation-edit-form" onSubmit={handleEditReservationSubmit}>
+              <label>
+                预约人
+                <input
+                  value={reservationEditForm.requester}
+                  onChange={(event) => setReservationEditForm({ ...reservationEditForm, requester: event.target.value })}
+                  disabled={isSubmitting}
+                />
+              </label>
+              <label>
+                SAP号
+                <input
+                  value={reservationEditForm.sapNo}
+                  onChange={(event) => setReservationEditForm({ ...reservationEditForm, sapNo: event.target.value })}
+                  placeholder="8位数字"
+                  maxLength={8}
+                  disabled={isSubmitting}
+                />
+              </label>
+              <label>
+                物料名称
+                <input
+                  value={reservationEditForm.materialName}
+                  onChange={(event) => setReservationEditForm({ ...reservationEditForm, materialName: event.target.value })}
+                  required
+                  disabled={isSubmitting}
+                />
+              </label>
+              <label>
+                单位
+                <input
+                  value={reservationEditForm.unit}
+                  onChange={(event) => setReservationEditForm({ ...reservationEditForm, unit: event.target.value })}
+                  placeholder="瓶 / 盒 / g"
+                  required
+                  disabled={isSubmitting}
+                />
+              </label>
+              <label>
+                数量
+                <input
+                  type="number"
+                  value={reservationEditForm.quantity}
+                  onChange={(event) => setReservationEditForm({ ...reservationEditForm, quantity: event.target.value })}
+                  min="0"
+                  step="0.01"
+                  required
+                  disabled={isSubmitting}
+                />
+              </label>
+              <label>
+                期望入库日期
+                <input
+                  type="date"
+                  value={reservationEditForm.expectedDate}
+                  onChange={(event) => setReservationEditForm({ ...reservationEditForm, expectedDate: event.target.value })}
+                  required
+                  disabled={isSubmitting}
+                />
+                <small>{reservationEditForm.expectedDate ? formatWeekday(reservationEditForm.expectedDate) : ""}</small>
+              </label>
+              {reservationEditMessage ? <p className="dialog-error reservation-edit-actions">{reservationEditMessage}</p> : null}
+              <div className="dialog-actions reservation-edit-actions">
+                <button className="secondary" type="button" onClick={closeEditReservation} disabled={isSubmitting}>
+                  取消
+                </button>
+                <button className="primary" type="submit" disabled={isSubmitting}>
+                  保存修改
+                </button>
+              </div>
+            </form>
           </section>
         </div>
       ) : null}
@@ -1687,11 +1837,13 @@ function RecordsTable({ records }: { records: UsageRecord[] }) {
 function ReservationsTable({
   records,
   onToggleReceipt,
+  onEdit,
   onDelete,
   isSubmitting,
 }: {
   records: ReservationRecord[];
   onToggleReceipt: (record: ReservationRecord) => void;
+  onEdit: (record: ReservationRecord) => void;
   onDelete: (record: ReservationRecord) => void;
   isSubmitting: boolean;
 }) {
@@ -1733,6 +1885,14 @@ function ReservationsTable({
                       disabled={isSubmitting}
                     >
                       {isReceived ? "已入研发库" : "需从仓储领取"}
+                    </button>
+                    <button
+                      className="table-action"
+                      type="button"
+                      onClick={() => onEdit(record)}
+                      disabled={isSubmitting}
+                    >
+                      编辑
                     </button>
                     <button
                       className="table-action table-action-danger"

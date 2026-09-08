@@ -89,6 +89,10 @@ export type ReservationInput = {
   expectedDate?: string;
 };
 
+export type ReservationUpdateInput = ReservationInput & {
+  id?: string;
+};
+
 export const initialMaterials: MaterialBatch[] = [
   {
     id: "batch-ethanol-001",
